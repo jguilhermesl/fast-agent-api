@@ -10,7 +10,7 @@ import type { ChatRequest, ChatResponse, ChatMessage } from '../types';
 
 const openai   = new OpenAI({ apiKey: config.openaiApiKey });
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
-const genai    = new GoogleGenerativeAI(config.googleApiKey);
+// const genai    = new GoogleGenerativeAI(config.googleApiKey);
 
 const MAX_TOOL_ROUNDS = 5;
 const FALLBACK_RESPONSE: ChatResponse = {
@@ -153,62 +153,62 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<{
 
 // ── Gemini Orchestrator ───────────────────────────────────────
 
-async function runGemini(req: ChatRequest, history: ChatMessage[]): Promise<{ output: string; tokensIn: number; tokensOut: number; model: string }> {
-  const tools = toGeminiTools(ORCHESTRATOR_TOOLS);
-  const model = genai.getGenerativeModel({
-    model: req.model_name,
-    tools: tools as Parameters<typeof genai.getGenerativeModel>[0]['tools'],
-    systemInstruction: req.system_prompt,
-  });
+// async function runGemini(req: ChatRequest, history: ChatMessage[]): Promise<{ output: string; tokensIn: number; tokensOut: number; model: string }> {
+//   const tools = toGeminiTools(ORCHESTRATOR_TOOLS);
+//   const model = genai.getGenerativeModel({
+//     model: req.model_name,
+//     tools: tools as Parameters<typeof genai.getGenerativeModel>[0]['tools'],
+//     systemInstruction: req.system_prompt,
+//   });
 
-  const geminiHistory = history.map((m) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }));
+//   const geminiHistory = history.map((m) => ({
+//     role: m.role === 'assistant' ? 'model' : 'user',
+//     parts: [{ text: m.content }],
+//   }));
 
-  const chat = model.startChat({ history: geminiHistory });
+//   const chat = model.startChat({ history: geminiHistory });
 
-  let totalIn = 0, totalOut = 0;
-  let currentMessage = req.client_messages;
+//   let totalIn = 0, totalOut = 0;
+//   let currentMessage = req.client_messages;
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const result = await chat.sendMessage(currentMessage);
-    const response = result.response;
-    totalIn  += response.usageMetadata?.promptTokenCount     ?? 0;
-    totalOut += response.usageMetadata?.candidatesTokenCount ?? 0;
+//   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+//     const result = await chat.sendMessage(currentMessage);
+//     const response = result.response;
+//     totalIn  += response.usageMetadata?.promptTokenCount     ?? 0;
+//     totalOut += response.usageMetadata?.candidatesTokenCount ?? 0;
 
-    const part = response.candidates?.[0]?.content?.parts?.[0];
-    if (!part) break;
+//     const part = response.candidates?.[0]?.content?.parts?.[0];
+//     if (!part) break;
 
-    // Resposta de texto final
-    if (part.text) {
-      return { output: part.text, tokensIn: totalIn, tokensOut: totalOut, model: req.model_name };
-    }
+//     // Resposta de texto final
+//     if (part.text) {
+//       return { output: part.text, tokensIn: totalIn, tokensOut: totalOut, model: req.model_name };
+//     }
 
-    // Tool call
-    if (part.functionCall) {
-      const args = part.functionCall.args as { input: string };
-      const toolResult = await runExecutor({
-        query: args.input,
-        agent_id: req.agent_id,
-        conversation_id: req.conversation_id,
-        lead_id: req.lead_id,
-        contact_phone: req.contact_phone,
-        scoped_client_id: req.scoped_client_id,
-        client_messages: req.client_messages,
-      });
+//     // Tool call
+//     if (part.functionCall) {
+//       const args = part.functionCall.args as { input: string };
+//       const toolResult = await runExecutor({
+//         query: args.input,
+//         agent_id: req.agent_id,
+//         conversation_id: req.conversation_id,
+//         lead_id: req.lead_id,
+//         contact_phone: req.contact_phone,
+//         scoped_client_id: req.scoped_client_id,
+//         client_messages: req.client_messages,
+//       });
 
-      currentMessage = JSON.stringify({
-        functionResponse: {
-          name: part.functionCall.name,
-          response: { content: toolResult },
-        },
-      });
-    }
-  }
+//       currentMessage = JSON.stringify({
+//         functionResponse: {
+//           name: part.functionCall.name,
+//           response: { content: toolResult },
+//         },
+//       });
+//     }
+//   }
 
-  throw new Error('Gemini orchestrator hit max rounds');
-}
+//   throw new Error('Gemini orchestrator hit max rounds');
+// }
 
 // ── Orquestrador principal (com fallback) ─────────────────────
 
@@ -223,7 +223,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     switch (req.model_provider) {
       case 'openai':    result = await runOpenAI(req, history);    break;
       case 'anthropic': result = await runAnthropic(req, history); break;
-      case 'gemini':    result = await runGemini(req, history);    break;
+      // case 'gemini':    result = await runGemini(req, history);    break;
       default:          result = await runOpenAI(req, history);
     }
   } catch (primaryErr) {
