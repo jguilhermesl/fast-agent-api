@@ -7,24 +7,19 @@ import {
   handleEnviarArquivo,
   handleKnowledgeBase,
 } from '../tools/handlers';
-import { EXECUTOR_TOOLS, toOpenAITools } from '../tools/definitions';
+import { 
+  EXECUTOR_TOOLS, 
+  toOpenAITools,
+  createDynamicToolsFromIntents,
+  combineTools
+} from '../tools/definitions';
 import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 
 const openai = new OpenAI({ apiKey: config.openaiApiKey });
 
 const MAX_TOOL_ROUNDS = 8;
 
-// ── Formata intents para o prompt ────────────────────────────
-
-function formatIntents(intents: Awaited<ReturnType<typeof getAgentIntents>>): string {
-  if (!intents.length) return '(nenhuma intenção configurada para este agente)';
-  return intents
-    .map((it) => {
-      const schema = it.request_schema ? `\n  schema: ${JSON.stringify(it.request_schema)}` : '';
-      return `- ${it.slug}: ${it.trigger_description}${schema}`;
-    })
-    .join('\n');
-}
+// ── Formata logs de execuções anteriores ─────────────────────
 
 function formatIntentLogs(logs: Awaited<ReturnType<typeof getIntentLogs>>): string {
   if (!logs.length) return '(nenhuma ação executada nesta conversa ainda)';
@@ -46,12 +41,8 @@ function formatIntentLogs(logs: Awaited<ReturnType<typeof getIntentLogs>>): stri
 
 // ── System prompt do Executor ─────────────────────────────────
 
-function buildExecutorPrompt(intentsText: string, intentLogsText: string): string {
-  return `<intencoes_disponiveis>
-${intentsText}
-</intencoes_disponiveis>
-
-<acoes_executadas>
+function buildExecutorPrompt(intentLogsText: string): string {
+  return `<acoes_executadas>
 ${intentLogsText}
 </acoes_executadas>
 
@@ -65,21 +56,28 @@ Não conversa com o usuário. Não gera respostas ao cliente — apenas executa 
 # PROCESSAMENTO DAS TAREFAS
 A tarefa chega como um array JSON. Cada item tem: tipo, objetivo, pedido_do_cliente, contexto, valor.
 Processe cada item em sequência. Nunca pule um item.
-Use o campo "contexto" e o histórico da conversa para montar os argumentos corretos das intenções.
+Use o campo "contexto" e o histórico da conversa para montar os argumentos corretos.
 
-# MAPEAMENTO TIPO → FERRAMENTA
+# FERRAMENTAS DISPONÍVEIS
+Você tem acesso a ferramentas específicas para cada ação:
+- **Ações de negócio**: Use as tools específicas de cada intent (ex: agendar_consulta, consultar_preco)
+- **agent_knowledge_base**: Busca informações na base de conhecimento
+- **atualizar_lead_crm**: Atualiza o estágio do lead no CRM
+- **enviar_arquivo**: Envia arquivo/mídia para o cliente
 
-| Tipo          | Ferramenta / Ação                                              |
-|---------------|----------------------------------------------------------------|
-| CONSULTA      | agent_knowledge_base (use "objetivo" como query)              |
-| AÇÃO          | executar_intent (identifique a intent pelo "objetivo"+"contexto") |
-| AGENDAMENTO   | executar_intent (passe data/hora do campo "valor")            |
-| VENDA         | executar_intent para consultar preços ou registrar proposta   |
-| CONVERSÃO     | executar_intent para registrar fechamento + atualizar_lead_crm com stage "convertido" |
-| ARQUIVO       | executar_intent (se precisar de URL dinâmica) ou enviar_arquivo (se já tem URL) |
-| CRM           | atualizar_lead_crm — use o campo "valor" como novo stage      |
-| TRANSFERÊNCIA | não chame ferramenta — inclua a flag REDIRECT_HUMAN no retorno |
-| CONTEXTO      | analise o contexto da conversa sem ferramenta externa         |
+# MAPEAMENTO TIPO → AÇÃO
+
+| Tipo          | Ação                                                          |
+|---------------|---------------------------------------------------------------|
+| CONSULTA      | agent_knowledge_base (use "objetivo" como query)             |
+| AÇÃO          | Use a tool específica da ação (ex: agendar_consulta)        |
+| AGENDAMENTO   | Use a tool de agendamento com data/hora do campo "valor"    |
+| VENDA         | Use tool específica para consultar preços ou registrar       |
+| CONVERSÃO     | Use tool de conversão + atualizar_lead_crm com "convertido" |
+| ARQUIVO       | enviar_arquivo (se já tem URL)                               |
+| CRM           | atualizar_lead_crm — use o campo "valor" como novo stage     |
+| TRANSFERÊNCIA | não chame ferramenta — inclua REDIRECT_HUMAN no retorno      |
+| CONTEXTO      | analise o contexto da conversa sem ferramenta externa        |
 
 # REGRAS
 - Nunca invente informações ou argumentos que não estejam no contexto
@@ -87,7 +85,7 @@ Use o campo "contexto" e o histórico da conversa para montar os argumentos corr
 - Use agent_knowledge_base no máximo 2x por execução
 - Se não encontrar dados, informe claramente no resultado
 - Se uma ferramenta retornar erro, registre o erro e continue os demais itens
-- Para executar_intent: use os dados do "contexto" e do histórico para preencher os argumentos corretamente
+- Use os dados do "contexto" e do histórico para preencher os argumentos corretamente
 
 # FORMATO DO RETORNO
 Retorne um texto estruturado com os resultados de cada tarefa, na ordem em que foram executados.
@@ -107,10 +105,15 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     getIntentLogs(input.agent_id, input.conversation_id),
   ]);
 
-  const systemPrompt = buildExecutorPrompt(
-    formatIntents(intents),
-    formatIntentLogs(intentLogs)
-  );
+  // Cria tools dinâmicas a partir das intents do banco
+  const dynamicTools = createDynamicToolsFromIntents(intents);
+  console.log(dynamicTools)
+  const allTools = combineTools(EXECUTOR_TOOLS, dynamicTools);
+  
+  // Cria um Set com os nomes das intents para lookup rápido
+  const intentSlugs = new Set(intents.map(intent => intent.slug));
+
+  const systemPrompt = buildExecutorPrompt(formatIntentLogs(intentLogs));
 
   const contextBlock = input.conversation_context
     ? `<historico_conversa>\n${input.conversation_context}\n</historico_conversa>\n\n`
@@ -124,7 +127,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     },
   ];
 
-  const tools = toOpenAITools(EXECUTOR_TOOLS);
+  const tools = toOpenAITools(allTools);
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let usedModel = 'gpt-4.1-mini';
@@ -184,33 +187,34 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     messages.push({ role: 'assistant', content: msg.content, tool_calls: msg.tool_calls });
 
     for (const toolCall of msg.tool_calls) {
+      const toolName = toolCall.function.name;
       const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
       let result: string;
 
-      switch (toolCall.function.name) {
-        case 'executar_intent':
-          result = await handleExecutarIntent(
-            args as { intent_key: string; arguments: Record<string, unknown> },
-            input
-          );
-          break;
-        case 'atualizar_lead_crm':
-          result = await handleAtualizarLeadCRM(args as { stage: string }, input);
-          break;
-        case 'enviar_arquivo':
-          result = await handleEnviarArquivo(args as { file_url: string }, input);
-          break;
-        case 'agent_knowledge_base':
-          result = await handleKnowledgeBase(args as { query: string }, input);
-          break;
-        default:
-          result = JSON.stringify({ error: `Tool desconhecida: ${toolCall.function.name}` });
+      // Verifica se é uma tool estática
+      if (toolName === 'atualizar_lead_crm') {
+        result = await handleAtualizarLeadCRM(args as { stage: string }, input);
+      } else if (toolName === 'enviar_arquivo') {
+        result = await handleEnviarArquivo(args as { file_url: string }, input);
+      } else if (toolName === 'agent_knowledge_base') {
+        result = await handleKnowledgeBase(args as { query: string }, input);
+      } 
+      // Verifica se é uma intent dinâmica
+      else if (intentSlugs.has(toolName)) {
+        result = await handleExecutarIntent(
+          { intent_key: toolName, arguments: args },
+          input
+        );
+      } 
+      // Tool desconhecida
+      else {
+        result = JSON.stringify({ error: `Tool desconhecida: ${toolName}` });
       }
 
       // Registra no log
       let parsedResult: unknown = result;
       try { parsedResult = JSON.parse(result); } catch { /* mantém string */ }
-      toolsCalledLog.push({ tool: toolCall.function.name, arguments: args, result: parsedResult });
+      toolsCalledLog.push({ tool: toolName, arguments: args, result: parsedResult });
 
       messages.push({
         role: 'tool',

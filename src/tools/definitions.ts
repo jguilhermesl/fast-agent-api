@@ -6,27 +6,6 @@
 
 export const EXECUTOR_TOOLS = [
   {
-    name: 'executar_intent',
-    description:
-      'Executa uma intenção configurada no banco (agent_intents) para o agente atual. ' +
-      'Use para ações operacionais: agendamento, consulta de dados, envio de mensagens, etc. ' +
-      'Sempre informe intent_key (slug da intent) e os argumentos necessários.',
-    parameters: {
-      type: 'object',
-      properties: {
-        intent_key: {
-          type: 'string',
-          description: 'Slug da intent a executar (ex: "agendar_consulta", "consultar_preco")',
-        },
-        arguments: {
-          type: 'object',
-          description: 'Parâmetros necessários para a intent conforme o request_schema dela',
-        },
-      },
-      required: ['intent_key', 'arguments'],
-    },
-  },
-  {
     name: 'atualizar_lead_crm',
     description:
       'Atualiza o estágio do lead no CRM. Use quando o lead avança ou muda de fase no funil.',
@@ -75,7 +54,82 @@ export const EXECUTOR_TOOLS = [
       required: ['query'],
     },
   },
-] as const;
+];
+
+// ── Helpers para tools dinâmicas ──────────────────────────────
+
+export interface DynamicTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export function createDynamicToolsFromIntents(intents: Array<{
+  slug: string;
+  trigger_description: string;
+  request_schema?: string | { body?: string; parameters?: unknown[] };
+}>): DynamicTool[] {
+  return intents.map((intent) => {
+    console.log("intent ==> ", intent)
+    let parameters: Record<string, unknown>;
+    
+    try {
+      if (!intent.request_schema) {
+        parameters = { type: 'object', properties: {}, required: [] };
+      } else if (typeof intent.request_schema === 'string') {
+        // Se for string, faz parse direto (assume que já é JSON Schema válido)
+        parameters = JSON.parse(intent.request_schema);
+      } else if (typeof intent.request_schema === 'object') {
+        // Se for objeto, extrai o body e converte para JSON Schema
+        const schema = intent.request_schema as { body?: string; parameters?: unknown[] };
+        if (schema.body) {
+          const bodyExample = JSON.parse(schema.body);
+          // Converte o exemplo do body em JSON Schema válido
+          const properties: Record<string, unknown> = {};
+          const required: string[] = [];
+          
+          for (const [key, value] of Object.entries(bodyExample)) {
+            // Infere o tipo baseado no valor de exemplo
+            let type = 'string';
+            if (typeof value === 'number') type = 'number';
+            if (typeof value === 'boolean') type = 'boolean';
+            if (Array.isArray(value)) type = 'array';
+            if (value && typeof value === 'object' && !Array.isArray(value)) type = 'object';
+            
+            properties[key] = {
+              type,
+              description: `Valor para ${key}`,
+            };
+            required.push(key);
+          }
+          
+          parameters = {
+            type: 'object',
+            properties,
+            required,
+          };
+        } else {
+          parameters = { type: 'object', properties: {}, required: [] };
+        }
+      } else {
+        parameters = { type: 'object', properties: {}, required: [] };
+      }
+    } catch (err) {
+      console.warn(`[Tools] Invalid request_schema for intent "${intent.slug}":`, err);
+      parameters = { type: 'object', properties: {}, required: [] };
+    }
+    
+    return {
+      name: intent.slug,
+      description: intent.trigger_description,
+      parameters,
+    };
+  });
+}
+
+export function combineTools(staticTools: typeof EXECUTOR_TOOLS, dynamicTools: DynamicTool[]) {
+  return [...staticTools, ...dynamicTools];
+}
 
 export const ORCHESTRATOR_TOOLS = [
   {
