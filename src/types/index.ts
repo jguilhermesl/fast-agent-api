@@ -101,14 +101,14 @@ export interface TokenUsage {
 }
 
 export interface TokenLogEntry {
-  conversation_id: string;
   agent_id: string;
   lead_id: string;
-  tokens_input: number;
-  tokens_output: number;
-  cost_usd: number;
-  model: string;
-  layer: 'orchestrator' | 'executor';
+  model_provider: string;
+  model_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
 }
 
 // ── Tool calling (genérico) ───────────────────────────────────

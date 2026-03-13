@@ -46,17 +46,28 @@ export async function getIntentLogs(
 
 export async function saveTokenUsage(entry: TokenLogEntry): Promise<void> {
   const { error } = await supabase
-    .from('agent_token_logs')
+    .from('llm_usage_logs')
     .insert(entry);
 
   if (error) {
-    // Não bloqueia o fluxo principal — só loga
     console.error('[Supabase] saveTokenUsage error:', error.message);
   }
 }
 
+export function inferModelProvider(modelName: string): string {
+  if (modelName.startsWith('gpt') || modelName.startsWith('o1') || modelName.startsWith('o3')) return 'openai';
+  if (modelName.startsWith('claude')) return 'anthropic';
+  if (modelName.startsWith('gemini')) return 'gemini';
+  return 'unknown';
+}
+
 export function calcCostUsd(model: string, tokensIn: number, tokensOut: number): number {
-  const rates = config.tokenCost[model] ?? { input: 0.000001, output: 0.000003 };
+  // Match exato primeiro, depois por prefixo (ex: "gpt-4.1-mini-2025-04-14" → "gpt-4.1-mini")
+  const rates =
+    config.tokenCost[model] ??
+    Object.entries(config.tokenCost).find(([key]) => model.startsWith(key))?.[1] ??
+    { input: 0.000001, output: 0.000003 };
+
   return parseFloat(
     ((tokensIn * rates.input) + (tokensOut * rates.output)).toFixed(8)
   );

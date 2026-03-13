@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
 import { getHistory, appendHistory } from '../memory/redis';
-import { saveTokenUsage, calcCostUsd, logError } from '../services/supabase';
+import { saveTokenUsage, calcCostUsd, inferModelProvider, logError } from '../services/supabase';
 import { runExecutor } from './executor';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
@@ -287,14 +287,14 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   // Salva tokens
   const costUsd = calcCostUsd(result.model, result.tokensIn, result.tokensOut);
   await saveTokenUsage({
-    conversation_id: req.conversation_id,
     agent_id: req.agent_id,
     lead_id: req.lead_id,
-    tokens_input: result.tokensIn,
-    tokens_output: result.tokensOut,
-    cost_usd: costUsd,
-    model: result.model,
-    layer: 'orchestrator',
+    model_provider: inferModelProvider(result.model),
+    model_name: result.model,
+    input_tokens: result.tokensIn,
+    output_tokens: result.tokensOut,
+    total_tokens: result.tokensIn + result.tokensOut,
+    estimated_cost_usd: costUsd,
   });
 
   // Atualiza histórico Redis

@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../config';
-import { getAgentIntents, getIntentLogs, saveTokenUsage, calcCostUsd, logError } from '../services/supabase';
+import { getAgentIntents, getIntentLogs, saveTokenUsage, calcCostUsd, inferModelProvider, logError } from '../services/supabase';
 import {
   handleExecutarIntent,
   handleAtualizarLeadCRM,
@@ -154,14 +154,14 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     // Sem tool calls → resposta final
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
       await saveTokenUsage({
-        conversation_id: input.conversation_id,
         agent_id: input.agent_id,
         lead_id: input.lead_id,
-        tokens_input: totalInputTokens,
-        tokens_output: totalOutputTokens,
-        cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
-        model: usedModel,
-        layer: 'executor',
+        model_provider: inferModelProvider(usedModel),
+        model_name: usedModel,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
+        total_tokens: totalInputTokens + totalOutputTokens,
+        estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
       });
       return buildTrace(msg.content ?? '(sem resposta)');
     }
@@ -208,14 +208,14 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
   // Chegou no limite de rounds — salva tokens e retorna o que tem
   await saveTokenUsage({
-    conversation_id: input.conversation_id,
     agent_id: input.agent_id,
     lead_id: input.lead_id,
-    tokens_input: totalInputTokens,
-    tokens_output: totalOutputTokens,
-    cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
-    model: usedModel,
-    layer: 'executor',
+    model_provider: inferModelProvider(usedModel),
+    model_name: usedModel,
+    input_tokens: totalInputTokens,
+    output_tokens: totalOutputTokens,
+    total_tokens: totalInputTokens + totalOutputTokens,
+    estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
   });
 
   await logError({
