@@ -8,7 +8,7 @@ import {
   handleKnowledgeBase,
 } from '../tools/handlers';
 import { EXECUTOR_TOOLS, toOpenAITools } from '../tools/definitions';
-import type { ExecutorInput } from '../types';
+import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 
 const openai = new OpenAI({ apiKey: config.openaiApiKey });
 
@@ -89,7 +89,12 @@ Se algum item for TRANSFERÊNCIA, inclua "REDIRECT_HUMAN" no retorno.`;
 
 // ── Executor Agent (OpenAI tool calling loop) ─────────────────
 
-export async function runExecutor(input: ExecutorInput): Promise<string> {
+export interface ExecutorResult {
+  result: string;
+  trace: ExecutorTrace;
+}
+
+export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult> {
   const [intents, intentLogs] = await Promise.all([
     getAgentIntents(input.agent_id),
     getIntentLogs(input.agent_id, input.conversation_id),
@@ -112,8 +117,27 @@ export async function runExecutor(input: ExecutorInput): Promise<string> {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let usedModel = 'gpt-4.1-mini';
+  let rounds = 0;
+  const toolsCalledLog: ToolCallLog[] = [];
+
+  const buildTrace = (finalResult: string): ExecutorResult => {
+    const cost_usd = calcCostUsd(usedModel, totalInputTokens, totalOutputTokens);
+    return {
+      result: finalResult,
+      trace: {
+        called: true,
+        rounds,
+        model: usedModel,
+        tokens_input: totalInputTokens,
+        tokens_output: totalOutputTokens,
+        cost_usd,
+        tools_called: toolsCalledLog,
+      },
+    };
+  };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    rounds = round + 1;
     const response = await openai.chat.completions.create({
       model: 'gpt-4.1-mini',
       messages,
@@ -139,7 +163,7 @@ export async function runExecutor(input: ExecutorInput): Promise<string> {
         model: usedModel,
         layer: 'executor',
       });
-      return msg.content ?? '(sem resposta)';
+      return buildTrace(msg.content ?? '(sem resposta)');
     }
 
     // Processa tool calls
@@ -168,6 +192,11 @@ export async function runExecutor(input: ExecutorInput): Promise<string> {
         default:
           result = JSON.stringify({ error: `Tool desconhecida: ${toolCall.function.name}` });
       }
+
+      // Registra no log
+      let parsedResult: unknown = result;
+      try { parsedResult = JSON.parse(result); } catch { /* mantém string */ }
+      toolsCalledLog.push({ tool: toolCall.function.name, arguments: args, result: parsedResult });
 
       messages.push({
         role: 'tool',
@@ -198,5 +227,5 @@ export async function runExecutor(input: ExecutorInput): Promise<string> {
     layer: 'executor',
   });
 
-  return '(executor atingiu limite de execução)';
+  return buildTrace('(executor atingiu limite de execução)');
 }

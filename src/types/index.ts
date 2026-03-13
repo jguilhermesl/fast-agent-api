@@ -18,10 +18,42 @@ export interface ChatRequest {
   tenant_id?: string;
 }
 
+// ── Execution Logs ────────────────────────────────────────────
+
+export interface ToolCallLog {
+  tool: string;
+  arguments: Record<string, unknown>;
+  result: unknown;
+}
+
+export interface ExecutorTrace {
+  called: boolean;
+  rounds: number;
+  model: string;
+  tokens_input: number;
+  tokens_output: number;
+  cost_usd: number;
+  tools_called: ToolCallLog[];
+}
+
+export interface ExecutionLogs {
+  history: ChatMessage[];
+  orchestrator: {
+    provider: string;
+    model: string;
+    rounds: number;
+    tokens_input: number;
+    tokens_output: number;
+    cost_usd: number;
+  };
+  executor: ExecutorTrace;
+}
+
 // Resposta que a API devolve ao n8n
 export interface ChatResponse {
   mensagens: string[];
   redirect_human: boolean;
+  logs: ExecutionLogs;
 }
 
 // Mensagem de histórico (Redis)
