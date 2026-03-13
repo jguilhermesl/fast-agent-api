@@ -86,7 +86,15 @@ export interface AgentIntent {
   id: string;
   slug: string;
   trigger_description: string;
-  request_schema?: string | { body?: string; parameters?: unknown[] };
+  request_schema?: string | { 
+    body?: string; 
+    parameters?: Array<{
+      name: string;
+      type: string;
+      required?: boolean;
+      description?: string;
+    }>;
+  };
 }
 
 // Log de execução de intent (intent_execution_logs)

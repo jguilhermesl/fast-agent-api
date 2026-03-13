@@ -67,29 +67,63 @@ export interface DynamicTool {
 export function createDynamicToolsFromIntents(intents: Array<{
   slug: string;
   trigger_description: string;
-  request_schema?: string | { body?: string; parameters?: unknown[] };
+  request_schema?: string | { body?: string; parameters?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    description?: string;
+  }> };
 }>): DynamicTool[] {
   return intents.map((intent) => {
-    console.log("intent ==> ", intent)
     let parameters: Record<string, unknown>;
     
     try {
       if (!intent.request_schema) {
+        // Schema vazio
         parameters = { type: 'object', properties: {}, required: [] };
       } else if (typeof intent.request_schema === 'string') {
-        // Se for string, faz parse direto (assume que já é JSON Schema válido)
+        // Formato 1: String (JSON Schema direto)
         parameters = JSON.parse(intent.request_schema);
       } else if (typeof intent.request_schema === 'object') {
-        // Se for objeto, extrai o body e converte para JSON Schema
-        const schema = intent.request_schema as { body?: string; parameters?: unknown[] };
-        if (schema.body) {
+        const schema = intent.request_schema as { 
+          body?: string; 
+          parameters?: Array<{
+            name: string;
+            type: string;
+            required?: boolean;
+            description?: string;
+          }> 
+        };
+        
+        // Formato 2: Objeto com array de parameters
+        if (schema.parameters && Array.isArray(schema.parameters) && schema.parameters.length > 0) {
+          const properties: Record<string, unknown> = {};
+          const required: string[] = [];
+          
+          for (const param of schema.parameters) {
+            properties[param.name] = {
+              type: param.type,
+              description: param.description || `Parâmetro ${param.name}`,
+            };
+            
+            if (param.required) {
+              required.push(param.name);
+            }
+          }
+          
+          parameters = {
+            type: 'object',
+            properties,
+            required,
+          };
+        }
+        // Formato 3: Objeto com body (exemplo de valores)
+        else if (schema.body) {
           const bodyExample = JSON.parse(schema.body);
-          // Converte o exemplo do body em JSON Schema válido
           const properties: Record<string, unknown> = {};
           const required: string[] = [];
           
           for (const [key, value] of Object.entries(bodyExample)) {
-            // Infere o tipo baseado no valor de exemplo
             let type = 'string';
             if (typeof value === 'number') type = 'number';
             if (typeof value === 'boolean') type = 'boolean';
