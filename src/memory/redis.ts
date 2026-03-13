@@ -2,7 +2,7 @@ import Redis from 'ioredis';
 import { config } from '../config';
 import type { ChatMessage } from '../types';
 
-const redis = new Redis(config.redisUrl, { lazyConnect: true });
+const redis = new Redis(config.redisUrl, { lazyConnect: true, db: 1 });
 
 redis.on('error', (err) => console.error('[Redis] Connection error:', err.message));
 
@@ -10,7 +10,7 @@ redis.on('error', (err) => console.error('[Redis] Connection error:', err.messag
 const TTL_SECONDS = 2_592_000;
 
 function historyKey(scopedClientId: string): string {
-  return `chat:history:${scopedClientId}`;
+  return scopedClientId;
 }
 
 // Busca o histórico da conversa (últimas N mensagens)

@@ -237,7 +237,8 @@ function mergeExecutorTraces(traces: ExecutorTrace[]): ExecutorTrace {
 // ── Orquestrador principal (com fallback) ─────────────────────
 
 export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
-  const history = await getHistory(req.scoped_client_id, 18);
+  const scopedClientId = `${req.agent_id}:${req.contact_phone}`;
+  const history = await getHistory(scopedClientId, 18);
 
   let result: ProviderResult | null = null;
   let providerUsed = req.model_provider;
@@ -299,7 +300,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   });
 
   // Atualiza histórico Redis
-  await appendHistory(req.scoped_client_id, [
+  await appendHistory(scopedClientId, [
     { role: 'user',      content: req.client_messages },
     { role: 'assistant', content: result.output },
   ]);
