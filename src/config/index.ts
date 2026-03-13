@@ -13,7 +13,7 @@ export const config = {
 
   openaiApiKey: required('OPENAI_API_KEY'),
   anthropicApiKey: required('ANTHROPIC_API_KEY'),
-  googleApiKey: required('GOOGLE_API_KEY'),
+  // googleApiKey: required('GOOGLE_API_KEY'),
 
   supabaseUrl: required('SUPABASE_URL'),
   supabaseAnonKey: required('SUPABASE_ANON_KEY'),
