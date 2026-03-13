@@ -102,6 +102,7 @@ export interface TokenUsage {
 
 export interface TokenLogEntry {
   agent_id: string;
+  conversation_id: string;
   lead_id: string;
   model_provider: string;
   model_name: string;

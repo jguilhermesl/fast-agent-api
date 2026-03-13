@@ -155,6 +155,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
       await saveTokenUsage({
         agent_id: input.agent_id,
+        conversation_id: input.conversation_id,
         lead_id: input.lead_id,
         model_provider: inferModelProvider(usedModel),
         model_name: usedModel,
@@ -209,6 +210,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   // Chegou no limite de rounds — salva tokens e retorna o que tem
   await saveTokenUsage({
     agent_id: input.agent_id,
+    conversation_id: input.conversation_id,
     lead_id: input.lead_id,
     model_provider: inferModelProvider(usedModel),
     model_name: usedModel,

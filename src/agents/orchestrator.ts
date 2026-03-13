@@ -288,6 +288,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   const costUsd = calcCostUsd(result.model, result.tokensIn, result.tokensOut);
   await saveTokenUsage({
     agent_id: req.agent_id,
+    conversation_id: req.conversation_id,
     lead_id: req.lead_id,
     model_provider: inferModelProvider(result.model),
     model_name: result.model,
