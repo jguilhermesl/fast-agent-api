@@ -1,0 +1,29 @@
+{
+  "name": "fast-agent-api",
+  "version": "1.0.0",
+  "description": "Orchestrator + Executor API — Fast Agent Maker",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "openai": "^4.52.0",
+    "@anthropic-ai/sdk": "^0.27.0",
+    "@google/generative-ai": "^0.17.0",
+    "@supabase/supabase-js": "^2.44.4",
+    "ioredis": "^5.4.1",
+    "axios": "^1.7.3",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
