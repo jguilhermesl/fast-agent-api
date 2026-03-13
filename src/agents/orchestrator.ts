@@ -125,7 +125,6 @@ interface ProviderResult {
 }
 
 // ── OpenAI Orchestrator ───────────────────────────────────────
-
 async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<ProviderResult> {
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
