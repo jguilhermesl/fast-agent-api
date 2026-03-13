@@ -13,14 +13,16 @@ export async function handleExecutarIntent(
   ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id'>
 ): Promise<string> {
   try {
+    const body = {
+      intent_key: args.intent_key,
+      arguments: args.arguments,
+      agent_id: ctx.agent_id,
+      context: { conversation_id: ctx.conversation_id },
+    };
+    console.log(`[Tool] executar_intent "${args.intent_key}" body:`, JSON.stringify(body));
     const response = await axios.post(
       `${config.supabaseUrl}/functions/v1/intent-dispatcher`,
-      {
-        intent_key: args.intent_key,
-        arguments: args.arguments,
-        agent_id: ctx.agent_id,
-        context: { conversation_id: ctx.conversation_id },
-      },
+      body,
       {
         headers: {
           Authorization: `Bearer ${config.supabaseServiceKey}`,
@@ -74,14 +76,14 @@ export async function handleAtualizarLeadCRM(
 
 export async function handleEnviarArquivo(
   args: { file_url: string },
-  ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id'>
+  ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id' | 'contact_phone'>
 ): Promise<string> {
   try {
     const response = await axios.post(
       `${config.supabaseUrl}/functions/v1/send-media`,
       {
         agent_id: ctx.agent_id,
-        contact_phone: ctx.conversation_id,
+        contact_phone: ctx.contact_phone,
         file_url: args.file_url,
       },
       {

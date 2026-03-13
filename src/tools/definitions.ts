@@ -81,23 +81,56 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'chamar_executor',
     description:
-      'Executa tarefas específicas: busca informações na base de conhecimento, ' +
-      'executa intenções do agente (agendamento, consulta de preços, etc.), ' +
-      'envia arquivos, atualiza CRM e redireciona para humano quando necessário. ' +
-      'Use sempre que precisar buscar informações ou executar uma ação antes de responder ao usuário. ' +
-      'IMPORTANTE: chame apenas UMA vez por turno, enviando TODAS as tarefas em um único array JSON.',
+      'Executa todas as ações necessárias antes de responder ao cliente: ' +
+      'busca na base de conhecimento, executa intenções (agendamento, consulta de preços, envio de protocolo, etc.), ' +
+      'envia arquivos, atualiza CRM e redireciona para humano. ' +
+      'OBRIGATÓRIO: chame esta ferramenta APENAS UMA VEZ por turno, ' +
+      'com TODAS as tarefas juntas no array "tasks". Nunca chame múltiplas vezes.',
     parameters: {
       type: 'object',
       properties: {
-        input: {
-          type: 'string',
-          description:
-            'Array JSON com todas as tarefas a executar. Exemplo: ' +
-            '[{"tipo":"CONSULTA","objetivo":"buscar preços","contexto":"cliente perguntou sobre planos"},' +
-            '{"tipo":"CRM","objetivo":"atualizar lead","valor":"proposta_enviada"}]',
+        tasks: {
+          type: 'array',
+          description: 'Todas as tarefas a executar neste turno, em ordem de prioridade',
+          items: {
+            type: 'object',
+            properties: {
+              tipo: {
+                type: 'string',
+                enum: ['CONSULTA', 'AÇÃO', 'AGENDAMENTO', 'ARQUIVO', 'CRM', 'VENDA', 'CONVERSÃO', 'TRANSFERÊNCIA', 'CONTEXTO'],
+                description:
+                  'CONSULTA=buscar informação na base de conhecimento; ' +
+                  'AÇÃO=executar uma intenção configurada; ' +
+                  'AGENDAMENTO=agendar serviço/consulta; ' +
+                  'ARQUIVO=enviar arquivo/mídia ao cliente; ' +
+                  'CRM=atualizar estágio do lead (use "valor" com o novo stage); ' +
+                  'VENDA=consultar preços ou finalizar proposta; ' +
+                  'CONVERSÃO=registrar fechamento/conversão; ' +
+                  'TRANSFERÊNCIA=encaminhar para atendimento humano; ' +
+                  'CONTEXTO=analisar contexto sem ação externa',
+              },
+              objetivo: {
+                type: 'string',
+                description: 'O que precisa ser resolvido nesta tarefa',
+              },
+              pedido_do_cliente: {
+                type: 'string',
+                description: 'Resumo do que o cliente pediu ou informou',
+              },
+              contexto: {
+                type: 'string',
+                description: 'Informações da conversa relevantes para esta tarefa',
+              },
+              valor: {
+                type: 'string',
+                description: 'Usado em CRM (novo estágio do funil), AGENDAMENTO (data/hora) e CONVERSÃO',
+              },
+            },
+            required: ['tipo', 'objetivo'],
+          },
         },
       },
-      required: ['input'],
+      required: ['tasks'],
     },
   },
 ] as const;

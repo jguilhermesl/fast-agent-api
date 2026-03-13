@@ -34,6 +34,8 @@ export interface ExecutorTrace {
   tokens_output: number;
   cost_usd: number;
   tools_called: ToolCallLog[];
+  query?: string;
+  result?: string;
 }
 
 export interface ExecutionLogs {
@@ -47,6 +49,10 @@ export interface ExecutionLogs {
     cost_usd: number;
   };
   executor: ExecutorTrace;
+  communication?: Array<{
+    query: string;
+    result: string;
+  }>;
 }
 
 // Resposta que a API devolve ao n8n
@@ -65,13 +71,14 @@ export interface ChatMessage {
 // ── Executor ─────────────────────────────────────────────────
 
 export interface ExecutorInput {
-  query: string;                  // array JSON de tarefas do Orquestrador
+  query: string;                    // array JSON de tarefas do Orquestrador
   agent_id: string;
   conversation_id: string;
   lead_id: string;
   contact_phone: string;
   scoped_client_id: string;
   client_messages: string;
+  conversation_context?: string;    // últimas mensagens do histórico (para dar contexto ao Executor)
 }
 
 // Intent configurada no Supabase (agent_intents)

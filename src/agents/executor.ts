@@ -20,7 +20,7 @@ function formatIntents(intents: Awaited<ReturnType<typeof getAgentIntents>>): st
   if (!intents.length) return '(nenhuma intenção configurada para este agente)';
   return intents
     .map((it) => {
-      const schema = it.request_schema ? `\n  schema: ${it.request_schema}` : '';
+      const schema = it.request_schema ? `\n  schema: ${JSON.stringify(it.request_schema)}` : '';
       return `- ${it.slug}: ${it.trigger_description}${schema}`;
     })
     .join('\n');
@@ -59,32 +59,39 @@ ${intentLogsText}
 
 # PAPEL
 Você é o Executor.
-Recebe tarefas do Orquestrador e resolve usando as ferramentas disponíveis.
-Não conversa com o usuário. Não gera respostas ao cliente — apenas executa ações e retorna resultados.
+Recebe um array de tarefas do Orquestrador e as processa usando as ferramentas disponíveis.
+Não conversa com o usuário. Não gera respostas ao cliente — apenas executa ações e retorna resultados estruturados.
 
-# PARSING DA TAREFA
-A tarefa chega como um array JSON com múltiplos itens.
-Faça o parse do array e processe cada item em sequência. Não pule nenhum item.
+# PROCESSAMENTO DAS TAREFAS
+A tarefa chega como um array JSON. Cada item tem: tipo, objetivo, pedido_do_cliente, contexto, valor.
+Processe cada item em sequência. Nunca pule um item.
+Use o campo "contexto" e o histórico da conversa para montar os argumentos corretos das intenções.
 
 # MAPEAMENTO TIPO → FERRAMENTA
-CONSULTA       → agent_knowledge_base
-AÇÃO           → executar_intent (identifique pelo "objetivo" + "contexto")
-AGENDAMENTO    → executar_intent
-ARQUIVO        → enviar_arquivo ou executar_intent
-CRM            → atualizar_lead_crm com o campo "valor" como stage
-TRANSFERÊNCIA  → retorne "REDIRECT_HUMAN" no resultado
-CONTEXTO       → analise sem ferramenta externa
+
+| Tipo          | Ferramenta / Ação                                              |
+|---------------|----------------------------------------------------------------|
+| CONSULTA      | agent_knowledge_base (use "objetivo" como query)              |
+| AÇÃO          | executar_intent (identifique a intent pelo "objetivo"+"contexto") |
+| AGENDAMENTO   | executar_intent (passe data/hora do campo "valor")            |
+| VENDA         | executar_intent para consultar preços ou registrar proposta   |
+| CONVERSÃO     | executar_intent para registrar fechamento + atualizar_lead_crm com stage "convertido" |
+| ARQUIVO       | executar_intent (se precisar de URL dinâmica) ou enviar_arquivo (se já tem URL) |
+| CRM           | atualizar_lead_crm — use o campo "valor" como novo stage      |
+| TRANSFERÊNCIA | não chame ferramenta — inclua a flag REDIRECT_HUMAN no retorno |
+| CONTEXTO      | analise o contexto da conversa sem ferramenta externa         |
 
 # REGRAS
-- nunca invente informações
-- processe todos os itens do array — nunca pule um item
-- use apenas o necessário para cada item
-- acione agent_knowledge_base no máximo 2x por execução
-- se não encontrar dados, informe claramente
+- Nunca invente informações ou argumentos que não estejam no contexto
+- Processe todos os itens do array sem pular nenhum
+- Use agent_knowledge_base no máximo 2x por execução
+- Se não encontrar dados, informe claramente no resultado
+- Se uma ferramenta retornar erro, registre o erro e continue os demais itens
+- Para executar_intent: use os dados do "contexto" e do histórico para preencher os argumentos corretamente
 
-# RETORNO
-Retorne os resultados agrupados por tipo, na ordem em que foram executados.
-Se algum item for TRANSFERÊNCIA, inclua "REDIRECT_HUMAN" no retorno.`;
+# FORMATO DO RETORNO
+Retorne um texto estruturado com os resultados de cada tarefa, na ordem em que foram executados.
+Se houver TRANSFERÊNCIA, inclua a linha: REDIRECT_HUMAN=true`;
 }
 
 // ── Executor Agent (OpenAI tool calling loop) ─────────────────
@@ -105,11 +112,15 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     formatIntentLogs(intentLogs)
   );
 
+  const contextBlock = input.conversation_context
+    ? `<historico_conversa>\n${input.conversation_context}\n</historico_conversa>\n\n`
+    : '';
+
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `<mensagem_cliente>\n${input.client_messages}\n</mensagem_cliente>\n\n<tarefa>\n${input.query}\n</tarefa>`,
+      content: `${contextBlock}<mensagem_atual_do_cliente>\n${input.client_messages}\n</mensagem_atual_do_cliente>\n\n<tarefas>\n${input.query}\n</tarefas>`,
     },
   ];
 
@@ -132,6 +143,8 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         tokens_output: totalOutputTokens,
         cost_usd,
         tools_called: toolsCalledLog,
+        query: input.query,
+        result: finalResult,
       },
     };
   };

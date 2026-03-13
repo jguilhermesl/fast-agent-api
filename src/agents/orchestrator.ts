@@ -12,6 +12,35 @@ const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
 
 const MAX_TOOL_ROUNDS = 5;
 
+// ── Schema de output injetado no system_prompt ────────────────
+// Garante que o modelo saiba exatamente o formato esperado,
+// independente do que o n8n colocar no system_prompt.
+const OUTPUT_SCHEMA_SUFFIX = `
+
+---
+
+# FORMATO DE RESPOSTA — OBRIGATÓRIO
+Responda SOMENTE com JSON válido no formato abaixo. Nenhum texto fora do JSON.
+
+\`\`\`json
+{
+  "mensagens": ["mensagem 1", "mensagem 2"],
+  "redirect_human": false
+}
+\`\`\`
+
+- **mensagens**: array de strings. Quebre em múltiplas mensagens curtas quando fizer sentido para WhatsApp. Nunca retorne um array vazio.
+- **redirect_human**: \`true\` apenas se precisar transferir para humano, caso contrário \`false\`.`;
+
+// ── Monta contexto das últimas mensagens para o Executor ──────
+function buildConversationContext(history: ChatMessage[]): string {
+  const recent = history.slice(-6);
+  if (!recent.length) return '';
+  return recent
+    .map((m) => `${m.role === 'user' ? 'Cliente' : 'Agente'}: ${m.content}`)
+    .join('\n');
+}
+
 const EMPTY_EXECUTOR_TRACE: ExecutorTrace = {
   called: false,
   rounds: 0,
@@ -92,21 +121,24 @@ interface ProviderResult {
   model: string;
   rounds: number;
   executorTrace: ExecutorTrace;
+  communications: Array<{ query: string; result: string }>;
 }
 
 // ── OpenAI Orchestrator ───────────────────────────────────────
 
 async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<ProviderResult> {
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
+  const conversationContext = buildConversationContext(history);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: req.system_prompt },
+    { role: 'system', content: req.system_prompt + OUTPUT_SCHEMA_SUFFIX },
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     { role: 'user', content: req.client_messages },
   ];
 
   let totalIn = 0, totalOut = 0, rounds = 0;
   const allExecutorTraces: ExecutorTrace[] = [];
+  const communications: Array<{ query: string; result: string }> = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     rounds = round + 1;
@@ -115,7 +147,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
       messages,
       tools,
       tool_choice: 'auto',
-      temperature: 0.5,
+      temperature: 0.2,
     });
 
     const msg = response.choices[0].message;
@@ -130,23 +162,27 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
         model: response.model,
         rounds,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
+        communications,
       };
     }
 
     messages.push({ role: 'assistant', content: msg.content, tool_calls: msg.tool_calls });
 
     for (const tc of msg.tool_calls) {
-      const args = JSON.parse(tc.function.arguments) as { input: string };
+      const args = JSON.parse(tc.function.arguments) as { tasks: unknown[] };
+      const query = JSON.stringify(args.tasks ?? []);
       const executorResult = await runExecutor({
-        query: args.input,
+        query,
         agent_id: req.agent_id,
         conversation_id: req.conversation_id,
         lead_id: req.lead_id,
         contact_phone: req.contact_phone,
         scoped_client_id: req.scoped_client_id,
         client_messages: req.client_messages,
+        conversation_context: conversationContext,
       });
       allExecutorTraces.push(executorResult.trace);
+      communications.push({ query, result: executorResult.result });
       messages.push({ role: 'tool', tool_call_id: tc.id, content: executorResult.result });
     }
   }
@@ -158,6 +194,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
 
 async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<ProviderResult> {
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
+  const conversationContext = buildConversationContext(history);
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
@@ -168,13 +205,14 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
   let totalIn = 0, totalOut = 0, rounds = 0;
   const usedModel = req.model_name;
   const allExecutorTraces: ExecutorTrace[] = [];
+  const communications: Array<{ query: string; result: string }> = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     rounds = round + 1;
     const response = await anthropic.messages.create({
       model: usedModel,
       max_tokens: 4096,
-      system: req.system_prompt,
+      system: req.system_prompt + OUTPUT_SCHEMA_SUFFIX,
       messages,
       tools: tools as Anthropic.Tool[],
     });
@@ -192,6 +230,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
         model: usedModel,
         rounds,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
+        communications,
       };
     }
 
@@ -200,17 +239,20 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of response.content) {
       if (block.type !== 'tool_use') continue;
-      const args = block.input as { input: string };
+      const args = block.input as { tasks: unknown[] };
+      const query = JSON.stringify(args.tasks ?? []);
       const executorResult = await runExecutor({
-        query: args.input,
+        query,
         agent_id: req.agent_id,
         conversation_id: req.conversation_id,
         lead_id: req.lead_id,
         contact_phone: req.contact_phone,
         scoped_client_id: req.scoped_client_id,
         client_messages: req.client_messages,
+        conversation_context: conversationContext,
       });
       allExecutorTraces.push(executorResult.trace);
+      communications.push({ query, result: executorResult.result });
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: executorResult.result });
     }
     messages.push({ role: 'user', content: toolResults });
@@ -299,15 +341,17 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     estimated_cost_usd: costUsd,
   });
 
-  // Atualiza histórico Redis
-  await appendHistory(scopedClientId, [
-    { role: 'user',      content: req.client_messages },
-    { role: 'assistant', content: result.output },
-  ]);
-
   console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} executorCalled=${result.executorTrace.called}`);
 
   const parsed = parseOrchestratorOutput(result.output);
+
+  // Atualiza histórico Redis — salva o texto limpo das mensagens, não o JSON bruto.
+  // Isso evita que o modelo veja JSON estrutural no histórico em vez de linguagem natural.
+  const assistantContent = parsed.mensagens.join('\n');
+  await appendHistory(scopedClientId, [
+    { role: 'user',      content: req.client_messages },
+    { role: 'assistant', content: assistantContent },
+  ]);
 
   const logs: ExecutionLogs = {
     history,
@@ -320,6 +364,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
       cost_usd: costUsd,
     },
     executor: result.executorTrace,
+    communication: result.communications.length > 0 ? result.communications : undefined,
   };
 
   return { ...parsed, logs };
