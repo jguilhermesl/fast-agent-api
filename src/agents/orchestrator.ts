@@ -131,7 +131,12 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: req.system_prompt + OUTPUT_SCHEMA_SUFFIX },
-    ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    ...history.map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.tools?.length
+        ? `${m.content}\n[ferramentas acionadas: ${m.tools.join(', ')}]`
+        : m.content,
+    })),
     { role: 'user', content: req.client_messages },
   ];
 
@@ -197,7 +202,12 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
-    ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    ...history.map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.tools?.length
+        ? `${m.content}\n[ferramentas acionadas: ${m.tools.join(', ')}]`
+        : m.content,
+    })),
     { role: 'user', content: req.client_messages },
   ];
 
@@ -347,9 +357,12 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   // Atualiza histórico Redis — salva o texto limpo das mensagens, não o JSON bruto.
   // Isso evita que o modelo veja JSON estrutural no histórico em vez de linguagem natural.
   const assistantContent = parsed.mensagens.join('\n');
+  const toolsUsed = result.executorTrace.called
+    ? result.executorTrace.tools_called.map((t) => t.tool)
+    : undefined;
   await appendHistory(scopedClientId, [
     { role: 'user',      content: req.client_messages },
-    { role: 'assistant', content: assistantContent },
+    { role: 'assistant', content: assistantContent, tools: toolsUsed },
   ]);
 
   const logs: ExecutionLogs = {

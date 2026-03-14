@@ -66,6 +66,7 @@ export interface ChatResponse {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  tools?: string[]; // nomes das tools acionadas neste turno (apenas em mensagens do assistant)
 }
 
 // ── Executor ─────────────────────────────────────────────────
