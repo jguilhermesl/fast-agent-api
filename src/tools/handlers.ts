@@ -28,7 +28,7 @@ export async function handleExecutarIntent(
           Authorization: `Bearer ${config.supabaseServiceKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 15_000,
+        timeout: 120_000,
       }
     );
     return JSON.stringify(response.data);
