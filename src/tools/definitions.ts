@@ -75,6 +75,7 @@ export function createDynamicToolsFromIntents(intents: Array<{
   }> };
 }>): DynamicTool[] {
   return intents.map((intent) => {
+    console.log(intent.trigger_description)
     let parameters: Record<string, unknown>;
     
     try {

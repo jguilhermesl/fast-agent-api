@@ -107,7 +107,6 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
   // Cria tools dinâmicas a partir das intents do banco
   const dynamicTools = createDynamicToolsFromIntents(intents);
-  console.log(dynamicTools)
   const allTools = combineTools(EXECUTOR_TOOLS, dynamicTools);
   
   // Cria um Set com os nomes das intents para lookup rápido
