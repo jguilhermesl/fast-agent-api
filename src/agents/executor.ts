@@ -98,8 +98,8 @@ Você tem acesso a ferramentas específicas para cada ação:
 - Nunca invente informações ou argumentos que não estejam no contexto
 - Processe todos os itens do array sem pular nenhum
 - Use agent_knowledge_base no máximo 2x por execução
-- Se não encontrar dados, informe claramente no resultado
-- Se uma ferramenta retornar erro, registre o erro e continue os demais itens
+- Se não encontrar dados ou uma tool retornar erro, registre de forma neutra no resultado (ex: "informação não disponível") — sem expor mensagens técnicas de erro ao orquestrador
+- Se uma ferramenta retornar erro, continue processando os demais itens do array
 - Use os dados do "contexto" e do histórico para preencher os argumentos corretamente
 - ⚠️ DATAS: Use SEMPRE o ano/mês/dia de <data_atual> como referência. Nunca assuma datas com base em treinamento. Se o cliente disser "amanhã", "semana que vem" etc., calcule a partir de <data_atual>.
 
