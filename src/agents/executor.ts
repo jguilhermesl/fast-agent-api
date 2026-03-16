@@ -41,8 +41,23 @@ function formatIntentLogs(logs: Awaited<ReturnType<typeof getIntentLogs>>): stri
 
 // ── System prompt do Executor ─────────────────────────────────
 
+function getCurrentDateBR(): string {
+  return new Date().toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function buildExecutorPrompt(intentLogsText: string): string {
-  return `<acoes_executadas>
+  const currentDate = getCurrentDateBR();
+  return `<data_atual>${currentDate}</data_atual>
+
+<acoes_executadas>
 ${intentLogsText}
 </acoes_executadas>
 
@@ -86,6 +101,7 @@ Você tem acesso a ferramentas específicas para cada ação:
 - Se não encontrar dados, informe claramente no resultado
 - Se uma ferramenta retornar erro, registre o erro e continue os demais itens
 - Use os dados do "contexto" e do histórico para preencher os argumentos corretamente
+- ⚠️ DATAS: Use SEMPRE o ano/mês/dia de <data_atual> como referência. Nunca assuma datas com base em treinamento. Se o cliente disser "amanhã", "semana que vem" etc., calcule a partir de <data_atual>.
 
 # FORMATO DO RETORNO
 Retorne um texto estruturado com os resultados de cada tarefa, na ordem em que foram executados.
