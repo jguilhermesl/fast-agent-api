@@ -57,12 +57,13 @@ stagesRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
 
     const tenant_id = agentData.tenant_id;
 
-    // 2. Buscar estágios disponíveis (stages)
-    const { data: stagesData, error: stagesError } = await supabase
-      .from('crm_stages')
+    // 2. Buscar estágios disponíveis (prioridade: agent-specific > tenant-level > defaults)
+    const { data: allStages, error: stagesError } = await supabase
+      .from('funnel_stages')
       .select('*')
       .eq('tenant_id', tenant_id)
-      .order('order', { ascending: true });
+      .or(`agent_id.eq.${agent_id},agent_id.is.null`)
+      .order('position', { ascending: true });
 
     if (stagesError) {
       console.error('[Stages] Error fetching stages:', stagesError.message);
@@ -70,7 +71,59 @@ stagesRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
       return;
     }
 
-    // 3. Buscar dados do lead (incluindo estágio atual)
+    // 3. Priorizar stages: agent-specific > tenant-level > defaults
+    let stagesData: any[] = [];
+    
+    if (allStages && allStages.length > 0) {
+      // Verificar se tem stages específicos do agente
+      const agentSpecificStages = allStages.filter((s: any) => s.agent_id === agent_id);
+      
+      if (agentSpecificStages.length > 0) {
+        // Usa apenas os stages específicos do agente
+        stagesData = agentSpecificStages;
+        console.log(`[Stages] Using ${stagesData.length} agent-specific stages`);
+      } else {
+        // Usa os stages do tenant (agent_id IS NULL)
+        stagesData = allStages.filter((s: any) => s.agent_id === null);
+        console.log(`[Stages] Using ${stagesData.length} tenant-level stages`);
+      }
+    }
+    
+    // Se não encontrou nenhum stage, usa defaults hardcoded
+    if (stagesData.length === 0) {
+      console.log('[Stages] No stages found, using hardcoded defaults');
+      stagesData = [
+        { id: 'default-1', name: 'Lead', slug: 'lead', position: 1, tenant_id, agent_id: null },
+        { id: 'default-2', name: 'Qualificado', slug: 'qualified', position: 2, tenant_id, agent_id: null },
+        { id: 'default-3', name: 'Proposta', slug: 'proposal', position: 3, tenant_id, agent_id: null },
+        { id: 'default-4', name: 'Negociação', slug: 'negotiation', position: 4, tenant_id, agent_id: null },
+        { id: 'default-5', name: 'Ganho', slug: 'won', position: 5, tenant_id, agent_id: null },
+        { id: 'default-6', name: 'Perdido', slug: 'lost', position: 6, tenant_id, agent_id: null },
+      ];
+    }
+
+    // 4. Sempre injetar "new" no início e "follow_up" no final
+    const newStage = {
+      id: 'stage-new',
+      name: 'Novo',
+      slug: 'new',
+      position: 0,
+      tenant_id,
+      agent_id: null,
+    };
+
+    const followUpStage = {
+      id: 'stage-follow-up',
+      name: 'Follow-up',
+      slug: 'follow_up',
+      position: stagesData.length + 1,
+      tenant_id,
+      agent_id: null,
+    };
+
+    stagesData = [newStage, ...stagesData, followUpStage];
+
+    // 5. Buscar dados do lead (incluindo estágio atual)
     const { data: leadData, error: leadError } = await supabase
       .from('leads')
       .select('*')
@@ -83,7 +136,7 @@ stagesRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
       return;
     }
 
-    // 4. Retornar resposta estruturada
+    // 6. Retornar resposta estruturada
     const response = {
       tenant_id,
       stages: stagesData || [],
