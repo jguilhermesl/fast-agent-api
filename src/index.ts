@@ -3,6 +3,7 @@ import express from 'express';
 import { config } from './config';
 import { connectRedis } from './memory/redis';
 import { chatRouter } from './routes/chat';
+import { stagesRouter } from './routes/stages';
 
 const app = express();
 
@@ -10,6 +11,7 @@ app.use(express.json({ limit: '5mb' }));
 
 // Routes
 app.use('/api/chat', chatRouter);
+app.use('/api/stages', stagesRouter);
 
 // Root health
 app.get('/', (_req, res) => res.json({ service: 'fast-agent-api', status: 'ok' }));
