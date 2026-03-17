@@ -22,6 +22,9 @@ export const config = {
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
   webhookSecret: required('WEBHOOK_SECRET'),
 
+  // Z-API partner/client token (required as Client-Token header for all Z-API requests)
+  zapiClientToken: process.env.ZAPI_CLIENT_TOKEN ?? '',
+
   // Custo por token (ajustar conforme modelos usados)
   tokenCost: {
     'gpt-4.1-mini':       { input: 0.00000015, output: 0.0000006 },

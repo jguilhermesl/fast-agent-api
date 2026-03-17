@@ -92,6 +92,113 @@ export async function logError(params: {
   }
 }
 
+// ── Send-external: conversation context ───────────────────────
+
+export interface ConversationContext {
+  id: string;
+  last_message_at: string | null;
+  channel: {
+    provider: string;
+    credentials: Record<string, string>;
+  };
+  contact: {
+    phone: string;
+  } | null;
+}
+
+export async function getConversationContext(
+  conversationId: string,
+): Promise<ConversationContext | null> {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('id, last_message_at, channel:channels(provider, credentials), contact:contacts(phone)')
+    .eq('id', conversationId)
+    .single();
+
+  if (error || !data) {
+    console.error('[Supabase] getConversationContext error:', error?.message);
+    return null;
+  }
+
+  const raw = data as unknown as {
+    id: string;
+    last_message_at: string | null;
+    channel: { provider: string; credentials: Record<string, string> } | null;
+    contact: { phone: string } | null;
+  };
+
+  if (!raw.channel) return null;
+
+  return {
+    id: raw.id,
+    last_message_at: raw.last_message_at,
+    channel: raw.channel,
+    contact: raw.contact,
+  };
+}
+
+// ── Send-external: message persistence ────────────────────────
+
+export interface MessageAttachment {
+  url: string;
+  type: string;
+  mimetype: string;
+}
+
+export interface InsertMessageParams {
+  conversation_id: string;
+  content: string;
+  direction: 'outbound' | 'inbound';
+  message_type: string;
+  attachments: MessageAttachment[];
+  status: 'sending' | 'sent' | 'failed' | 'queued';
+}
+
+export async function insertMessage(
+  params: InsertMessageParams,
+): Promise<{ id: string } | null> {
+  const { data, error } = await supabase
+    .from('messages')
+    .insert(params)
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('[Supabase] insertMessage error:', error.message);
+    return null;
+  }
+
+  return data as { id: string };
+}
+
+export async function updateMessageStatus(
+  messageId: string,
+  update: { status: 'sent' | 'failed'; provider_message_id?: string | null; metadata?: Record<string, unknown> },
+): Promise<void> {
+  const { error } = await supabase
+    .from('messages')
+    .update(update)
+    .eq('id', messageId);
+
+  if (error) {
+    console.error('[Supabase] updateMessageStatus error:', error.message);
+  }
+}
+
+export async function updateLeadLastMessageAt(
+  conversationId: string,
+  timestamp: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('leads')
+    .update({ last_message_at: timestamp })
+    .eq('id', conversationId);
+
+  if (error) {
+    console.error('[Supabase] updateLeadLastMessageAt error:', error.message);
+  }
+}
+
 // ── Knowledge base (vector search) ───────────────────────────
 
 export async function searchKnowledgeBase(
