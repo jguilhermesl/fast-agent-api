@@ -53,8 +53,8 @@ const EMPTY_EXECUTOR_TRACE: ExecutorTrace = {
 
 function makeFallback(history: ChatMessage[], logs?: Partial<ExecutionLogs>): ChatResponse {
   return {
-    mensagens: ['Desculpe, estou com uma instabilidade no momento. Pode tentar novamente em instantes? 🙏'],
-    redirect_human: false,
+    mensagens: ['Só um momento, por favor.'],
+    redirect_human: true,
     logs: {
       history,
       orchestrator: { provider: '', model: '', rounds: 0, tokens_input: 0, tokens_output: 0, cost_usd: 0 },
