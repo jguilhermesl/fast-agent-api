@@ -12,6 +12,23 @@ const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
 
 const MAX_TOOL_ROUNDS = 5;
 
+// ── Detecção de saudação/despedida pura ──────────────────────
+// Mensagens curtas de cumprimento não precisam de busca na base de conhecimento.
+// Para tudo o mais, forçamos o executor no primeiro round.
+
+const GREETING_PATTERNS = [
+  /^(oi|olá|ola|hey|hi|hello|e aí|eai|eae|opa|oie)\b/i,
+  /^(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\b/i,
+  /^(tchau|até mais|ate mais|até logo|ate logo|adeus|flw|falou|valeu|obrigad[oa]|muito obrigad[oa]|thanks|thank you)\b/i,
+];
+
+function isGreetingOrFarewell(message: string): boolean {
+  const trimmed = message.trim();
+  // Só aplica a mensagens curtas — saudações puras raramente passam de 50 chars
+  if (trimmed.length > 50) return false;
+  return GREETING_PATTERNS.some((p) => p.test(trimmed));
+}
+
 // ── Schema de output injetado no system_prompt ────────────────
 // Garante que o modelo saiba exatamente o formato esperado,
 // independente do que o n8n colocar no system_prompt.
@@ -128,6 +145,7 @@ interface ProviderResult {
 async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<ProviderResult> {
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
+  const forceExecutor = !isGreetingOrFarewell(req.client_messages);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: req.system_prompt + OUTPUT_SCHEMA_SUFFIX },
@@ -146,11 +164,14 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     rounds = round + 1;
+    // Round 0: força o executor (exceto em saudações/despedidas)
+    // Rounds seguintes: auto — o modelo decide se precisa de mais informações
+    const toolChoice = (round === 0 && forceExecutor) ? 'required' : 'auto';
     const response = await openai.chat.completions.create({
       model: req.model_name,
       messages,
       tools,
-      tool_choice: 'auto',
+      tool_choice: toolChoice,
       temperature: 0.2,
     });
 
@@ -199,6 +220,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
 async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<ProviderResult> {
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
+  const forceExecutor = !isGreetingOrFarewell(req.client_messages);
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
@@ -218,12 +240,16 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     rounds = round + 1;
+    // Round 0: força o executor (exceto em saudações/despedidas)
+    const toolChoice: Anthropic.MessageCreateParams['tool_choice'] =
+      (round === 0 && forceExecutor) ? { type: 'any' } : { type: 'auto' };
     const response = await anthropic.messages.create({
       model: usedModel,
       max_tokens: 4096,
       system: req.system_prompt + OUTPUT_SCHEMA_SUFFIX,
       messages,
       tools: tools as Anthropic.Tool[],
+      tool_choice: toolChoice,
     });
 
     totalIn  += response.usage.input_tokens;
