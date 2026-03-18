@@ -201,14 +201,18 @@ export async function updateLeadLastMessageAt(
 
 // ── Knowledge base (vector search) ───────────────────────────
 
+const KB_MATCH_COUNT   = 3;    // máximo de chunks retornados
+const KB_MIN_SIMILARITY = 0.65; // descarta resultados pouco relevantes
+const KB_MAX_CHUNK_CHARS = 600; // trunca chunks muito longos
+
 export async function searchKnowledgeBase(
   agentId: string,
   queryEmbedding: number[],
-  limit = 5
+  limit = KB_MATCH_COUNT,
 ): Promise<string> {
-  const { data, error } = await supabase.rpc('match_agent_documents', {
+  const { data, error } = await supabase.rpc('match_documents', {
     query_embedding: queryEmbedding,
-    match_agent_id: agentId,
+    filter: { agent_id: agentId },
     match_count: limit,
   });
 
@@ -217,11 +221,25 @@ export async function searchKnowledgeBase(
     return '(base de conhecimento indisponível no momento)';
   }
 
-  if (!data || data.length === 0) {
-    return '(nenhuma informação encontrada na base de conhecimento)';
+  const docs = (data ?? []) as Array<{ content: string; similarity: number }>;
+
+  // Filtra por similaridade mínima para evitar ruído fora de contexto
+  const relevant = docs.filter((d) => d.similarity >= KB_MIN_SIMILARITY);
+
+  if (relevant.length === 0) {
+    return '(nenhuma informação relevante encontrada na base de conhecimento)';
   }
 
-  return (data as Array<{ content: string; similarity: number }>)
-    .map((doc) => doc.content)
+  return relevant
+    .map((doc) => {
+      const text = doc.content.trim();
+      // Trunca chunks muito longos mantendo frases completas
+      if (text.length <= KB_MAX_CHUNK_CHARS) return text;
+      const truncated = text.slice(0, KB_MAX_CHUNK_CHARS);
+      const lastPeriod = truncated.lastIndexOf('.');
+      return lastPeriod > KB_MAX_CHUNK_CHARS * 0.6
+        ? truncated.slice(0, lastPeriod + 1)
+        : truncated + '...';
+    })
     .join('\n\n---\n\n');
 }
