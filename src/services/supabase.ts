@@ -201,7 +201,7 @@ export async function updateLeadLastMessageAt(
 
 // ── Knowledge base (vector search) ───────────────────────────
 
-const KB_MATCH_COUNT   = 3;    // máximo de chunks retornados
+const KB_MATCH_COUNT   = 5;    // máximo de chunks retornados
 const KB_MIN_SIMILARITY = 0.65; // descarta resultados pouco relevantes
 const KB_MAX_CHUNK_CHARS = 600; // trunca chunks muito longos
 

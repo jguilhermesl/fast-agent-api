@@ -39,10 +39,13 @@ export const EXECUTOR_TOOLS = [
   {
     name: 'agent_knowledge_base',
     description:
-      'Busca informações na base de conhecimento da empresa usando busca semântica. ' +
-      'Use para: preços, horários, serviços, políticas, procedimentos, agendamento, ' +
-      'formas de pagamento e qualquer informação específica da empresa. ' +
-      'Acione no máximo 2 vezes — se não encontrar, informe que não encontrou.',
+      'Busca informações COMPLEMENTARES na base de conhecimento. ' +
+      'Use SOMENTE para contexto adicional que não é coberto por uma intent específica: ' +
+      'descontos, promoções, condições especiais, regras de negócio, observações sobre serviços, ' +
+      'perguntas frequentes ou informações que enriquecem a resposta além do que a intent retornou. ' +
+      'NUNCA use no lugar de uma intent específica disponível (ex: se existe consultar_preco, use ela). ' +
+      'A query deve ser específica e contextual, nunca genérica. ' +
+      'Acione no máximo 2 vezes por execução.',
     parameters: {
       type: 'object',
       properties: {
