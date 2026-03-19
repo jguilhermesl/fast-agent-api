@@ -94,10 +94,14 @@ Exemplos do que buscar na KB após a intent:
 - Informações que o cliente provavelmente vai perguntar em seguida
 - Alertas ou observações importantes sobre o produto/serviço
 
-## Regra 3 — Query da KB deve ser específica e contextual
-Nunca use o "objetivo" genérico como query da KB. Formule uma query específica com base no que o cliente perguntou e no que a intent já retornou.
-❌ Errado: query="consultar preço"
-✅ Certo: query="desconto ou condição especial para higienização de colchão"
+## Regra 3 — Query da KB deve ser curta, direta e baseada em palavras-chave
+Nunca use frases longas ou o "objetivo" completo como query. O embedding performa melhor com termos curtos e específicos (3 a 6 palavras no máximo).
+Extraia as palavras-chave do que o cliente perguntou e do contexto — não elabore frases completas.
+❌ Errado: query="Verificar política de desconto/pacote para contratar higienização + impermeabilização (mesmo sendo em dias diferentes) e condições de pagamento"
+❌ Errado: query="consultar preço higienização colchão solteiro casal"
+✅ Certo: query="desconto pacote higienização impermeabilização"
+✅ Certo: query="condição especial dois serviços"
+✅ Certo: query="desconto colchão higienização"
 
 ## Regra 4 — Quando NÃO chamar a KB
 Não chame agent_knowledge_base quando:

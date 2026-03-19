@@ -202,7 +202,7 @@ export async function updateLeadLastMessageAt(
 // ── Knowledge base (vector search) ───────────────────────────
 
 const KB_MATCH_COUNT   = 5;    // máximo de chunks retornados
-const KB_MIN_SIMILARITY = 0.65; // descarta resultados pouco relevantes
+const KB_MIN_SIMILARITY = 0.70; // descarta resultados pouco relevantes
 const KB_MAX_CHUNK_CHARS = 600; // trunca chunks muito longos
 
 export async function searchKnowledgeBase(
@@ -221,10 +221,19 @@ export async function searchKnowledgeBase(
     return '(base de conhecimento indisponível no momento)';
   }
 
-  const docs = (data ?? []) as Array<{ content: string; similarity: number }>;
+  const docs = (data ?? []) as Array<{ content: string; similarity: number; metadata?: Record<string, unknown> }>;
+
+  // Log para debug — mostra scores e metadados de cada chunk retornado
+  console.log(`[KB] query retornou ${docs.length} chunks para agent_id=${agentId}:`);
+  docs.forEach((d, i) => {
+    const preview = d.content.slice(0, 80).replace(/\n/g, ' ');
+    console.log(`  [${i + 1}] similarity=${d.similarity.toFixed(4)} | metadata=${JSON.stringify(d.metadata ?? {})} | "${preview}..."`);
+  });
 
   // Filtra por similaridade mínima para evitar ruído fora de contexto
   const relevant = docs.filter((d) => d.similarity >= KB_MIN_SIMILARITY);
+
+  console.log(`[KB] após filtro (>=${KB_MIN_SIMILARITY}): ${relevant.length} chunks aprovados`);
 
   if (relevant.length === 0) {
     return '(nenhuma informação relevante encontrada na base de conhecimento)';
