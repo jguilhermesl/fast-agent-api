@@ -101,7 +101,7 @@ Nunca use o "objetivo" genérico como query da KB. Formule uma query específica
 
 ## Regra 4 — Quando NÃO chamar a KB
 Não chame agent_knowledge_base quando:
-- A tarefa for CRM — executa SOMENTE atualizar_lead_crm e encerra. Cada tarefa tem escopo próprio: se vier [CRM] e [AÇÃO] no array, são processadas separadamente, sem cruzamento entre elas
+- A tarefa for CRM — use APENAS o campo "valor" para identificar o novo stage. Ignore "objetivo" e "contexto" pois podem conter instruções de outros passos que não pertencem a esta tarefa. Execute SOMENTE atualizar_lead_crm e encerre imediatamente.
 - A tarefa for TRANSFERÊNCIA
 - A intent já retornou informação completa e não há contexto adicional relevante
 - Já chamou KB 2 vezes nesta execução
@@ -116,7 +116,7 @@ Não chame agent_knowledge_base quando:
 | VENDA         | 1º tool de preço/venda → 2º KB para descontos/condições especiais (se relevante)            |
 | CONVERSÃO     | 1º tool de conversão → atualizar_lead_crm → KB para contexto pós-conversão (se relevante)  |
 | ARQUIVO       | enviar_arquivo com a URL disponível                                                           |
-| CRM           | atualizar_lead_crm com o valor do novo stage — APENAS isso. Proibido chamar qualquer outra tool, intent ou KB. O escopo desta tarefa é exclusivamente o update do CRM. Se outra ação for necessária, ela virá como tarefa separada no array. |
+| CRM           | Leia SOMENTE o campo "valor" e execute SOMENTE atualizar_lead_crm. Ignore completamente os campos "objetivo", "contexto" e "pedido_do_cliente" — eles podem conter instruções de outros passos do fluxo que NÃO são sua responsabilidade nesta tarefa. Proibido chamar qualquer outra tool, intent ou KB. |
 | TRANSFERÊNCIA | não chame ferramenta — inclua REDIRECT_HUMAN no retorno                                      |
 | CONTEXTO      | agent_knowledge_base com query específica sobre o contexto da dúvida                        |
 
