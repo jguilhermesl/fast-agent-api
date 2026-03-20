@@ -22,7 +22,7 @@ if (!token || !testPhone) {
 
 const credentials = {
   api_token: token,
-  api_url: process.env.WHATSBIZAPI_URL || 'https://app.whatsbizapi.com',
+  api_url: process.env.WHATSBIZAPI_URL || 'https://whatsbizapi.com/api/wpbox',
 };
 
 // ── Test Functions ─────────────────────────────────────────────
