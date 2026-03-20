@@ -17,33 +17,24 @@ export interface AdapterResult {
 
 // ── WhatsBizAPI Adapter ────────────────────────────────────────
 
-export async function whatsbizapiSend(
-  credentials: Record<string, string>,
-  params: SendMessageParams,
+/**
+ * Send text message via WhatsBizAPI
+ */
+async function whatsbizapiSendText(
+  baseUrl: string,
+  token: string,
+  phone: string,
+  message: string,
 ): Promise<AdapterResult> {
-  const baseUrl = credentials.api_url || 'https://app.whatsbizapi.com';
-  const token = credentials.api_token;
-
-  if (!token) return { success: false, error: 'Missing WhatsBizAPI token' };
-
   try {
-    const isMedia = params.type && params.type !== 'text';
-    const endpoint = isMedia
-      ? `${baseUrl}/api/wpbox/sendmedia`
-      : `${baseUrl}/api/wpbox/sendmessage`;
-
-    const body: Record<string, unknown> = {
+    const endpoint = `${baseUrl}/api/wpbox/sendmessage`;
+    const body = {
       token,
-      phone: params.phone,
+      phone,
+      message,
     };
 
-    if (isMedia) {
-      body.type    = params.type;
-      body.url     = params.mediaUrl;
-      body.caption = params.content;
-    } else {
-      body.text = params.content;
-    }
+    console.log(`[WhatsBizAPI] Sending text to ${phone}`);
 
     const res = await axios.post(endpoint, body, {
       headers: { 'Content-Type': 'application/json' },
@@ -56,17 +47,143 @@ export async function whatsbizapiSend(
       return { success: false, error: String(data.error) };
     }
 
+    const messageId = String(data.message_id ?? data.message_wamid ?? '');
+    console.log(`[WhatsBizAPI] ✅ Text sent successfully. ID: ${messageId}`);
+
     return {
       success: true,
-      providerMessageId: String(data.message_id ?? data.wamid ?? ''),
+      providerMessageId: messageId,
     };
   } catch (e: unknown) {
     if (axios.isAxiosError(e)) {
-      const msg = (e.response?.data as Record<string, unknown>)?.error ?? e.message;
-      return { success: false, error: String(msg) };
+      const errMsg = (e.response?.data as Record<string, unknown>)?.error ?? e.message;
+      console.error(`[WhatsBizAPI] ❌ Text send failed: ${errMsg}`);
+      return { success: false, error: String(errMsg) };
     }
+    console.error(`[WhatsBizAPI] ❌ Text send failed: ${String(e)}`);
     return { success: false, error: String(e) };
   }
+}
+
+/**
+ * Send media message via WhatsBizAPI (image, video, audio, document)
+ */
+async function whatsbizapiSendMedia(
+  baseUrl: string,
+  token: string,
+  phone: string,
+  type: string,
+  url: string,
+  caption?: string,
+): Promise<AdapterResult> {
+  try {
+    const endpoint = `${baseUrl}/api/wpbox/sendmedia`;
+    const body: Record<string, unknown> = {
+      token,
+      phone,
+      type,
+      url,
+    };
+
+    // Add caption/message if provided
+    if (caption) {
+      body.message = caption;
+    }
+
+    console.log(`[WhatsBizAPI] Sending ${type} to ${phone}`);
+
+    const res = await axios.post(endpoint, body, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30_000,
+    });
+
+    const data = res.data as Record<string, unknown>;
+
+    if (data.error) {
+      return { success: false, error: String(data.error) };
+    }
+
+    const messageId = String(data.message_id ?? data.message_wamid ?? '');
+    console.log(`[WhatsBizAPI] ✅ ${type} sent successfully. ID: ${messageId}`);
+
+    return {
+      success: true,
+      providerMessageId: messageId,
+    };
+  } catch (e: unknown) {
+    if (axios.isAxiosError(e)) {
+      const errMsg = (e.response?.data as Record<string, unknown>)?.error ?? e.message;
+      console.error(`[WhatsBizAPI] ❌ ${type} send failed: ${errMsg}`);
+      return { success: false, error: String(errMsg) };
+    }
+    console.error(`[WhatsBizAPI] ❌ ${type} send failed: ${String(e)}`);
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
+ * Main WhatsBizAPI adapter - routes to appropriate sender based on type
+ */
+export async function whatsbizapiSend(
+  credentials: Record<string, string>,
+  params: SendMessageParams,
+): Promise<AdapterResult> {
+  const baseUrl = credentials.api_url || 'https://app.whatsbizapi.com';
+  const token = credentials.api_token;
+
+  // Validate credentials
+  if (!token) {
+    return { success: false, error: 'Missing WhatsBizAPI token' };
+  }
+
+  // Validate phone number
+  if (!params.phone) {
+    return { success: false, error: 'Missing phone number' };
+  }
+
+  const messageType = params.type || 'text';
+
+  // ── TEXT MESSAGE ──────────────────────────────────────────────
+  if (messageType === 'text') {
+    if (!params.content) {
+      return { success: false, error: 'Missing message content for text type' };
+    }
+    return whatsbizapiSendText(baseUrl, token, params.phone, params.content);
+  }
+
+  // ── MEDIA MESSAGES ────────────────────────────────────────────
+  if (!params.mediaUrl) {
+    return { success: false, error: `Missing media URL for ${messageType} type` };
+  }
+
+  // Map internal types to WhatsBizAPI types
+  let apiType: string;
+  switch (messageType) {
+    case 'image':
+      apiType = 'image';
+      break;
+    case 'video':
+      apiType = 'video';
+      break;
+    case 'audio':
+    case 'ptt':
+      apiType = 'audio';
+      break;
+    case 'document':
+      apiType = 'document';
+      break;
+    default:
+      return { success: false, error: `Unsupported message type: ${messageType}` };
+  }
+
+  return whatsbizapiSendMedia(
+    baseUrl,
+    token,
+    params.phone,
+    apiType,
+    params.mediaUrl,
+    params.content,
+  );
 }
 
 // ── Z-API Adapter ──────────────────────────────────────────────
