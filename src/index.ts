@@ -5,6 +5,7 @@ import { connectRedis } from './memory/redis';
 import { chatRouter } from './routes/chat';
 import { stagesRouter } from './routes/stages';
 import { sendExternalRouter } from './routes/sendExternal';
+import { typingRouter } from './routes/typing';
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(express.json({ limit: '5mb' }));
 app.use('/api/chat', chatRouter);
 app.use('/api/stages', stagesRouter);
 app.use('/api/send-external', sendExternalRouter);
+app.use('/api/typing', typingRouter);
 
 // Root health
 app.get('/', (_req, res) => res.json({ service: 'fast-agent-api', status: 'ok' }));
