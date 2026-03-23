@@ -7,6 +7,7 @@ export interface SendMessageParams {
   content: string;
   type?: string;
   mediaUrl?: string;
+  delayTyping?: number;
 }
 
 export interface AdapterResult {
@@ -249,26 +250,26 @@ export async function zapiSend(
       switch (params.type) {
         case 'video':
           endpoint = `${base}/send-video`;
-          body = { phone: params.phone, video: params.mediaUrl, caption: params.content || '' };
+          body = { phone: params.phone, video: params.mediaUrl, caption: params.content || '', delayTyping: params.delayTyping ?? 0 };
           break;
         case 'audio':
         case 'ptt':
           endpoint = `${base}/send-audio`;
-          body = { phone: params.phone, audio: params.mediaUrl };
+          body = { phone: params.phone, audio: params.mediaUrl, delayTyping: params.delayTyping ?? 0 };
           break;
         case 'document':
           endpoint = `${base}/send-document/${encodeURIComponent(params.content || 'arquivo')}`;
-          body = { phone: params.phone, document: params.mediaUrl };
+          body = { phone: params.phone, document: params.mediaUrl, delayTyping: params.delayTyping ?? 0 };
           break;
         default:
           // image and any other media type
           endpoint = `${base}/send-image`;
-          body = { phone: params.phone, image: params.mediaUrl, caption: params.content || '' };
+          body = { phone: params.phone, image: params.mediaUrl, caption: params.content || '', delayTyping: params.delayTyping ?? 0 };
           break;
       }
     } else {
       endpoint = `${base}/send-text`;
-      body = { phone: params.phone, message: params.content };
+      body = { phone: params.phone, message: params.content, delayTyping: params.delayTyping ?? 0 };
     }
 
     const res = await axios.post(endpoint, body, { headers, timeout: 30_000 });

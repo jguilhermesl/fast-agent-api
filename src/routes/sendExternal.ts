@@ -124,10 +124,11 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
     const result = await adapter(
       channel.credentials as Record<string, string>,
       {
-        phone:    targetPhone,
-        content:  content || '',
+        phone:       targetPhone,
+        content:     content || '',
         type,
-        mediaUrl: media_url,
+        mediaUrl:    media_url,
+        delayTyping: 2,
       },
       config.zapiClientToken,
     );
