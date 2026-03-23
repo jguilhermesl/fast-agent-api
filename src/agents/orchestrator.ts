@@ -49,6 +49,29 @@ Responda SOMENTE com JSON válido no formato abaixo. Nenhum texto fora do JSON.
 - **mensagens**: array de strings. Quebre em múltiplas mensagens curtas quando fizer sentido para WhatsApp. Nunca retorne um array vazio.
 - **redirect_human**: \`true\` apenas se precisar transferir para humano, caso contrário \`false\`.`;
 
+// ── Formata mensagem do cliente conforme o tipo ───────────────
+// Garante que o LLM entenda que análises de imagem/áudio não são textos digitados pelo cliente.
+
+function formatClientMessage(content: string, type?: string): string {
+  switch (type) {
+    case 'image_analysis':
+      return `[O cliente enviou uma imagem. A descrição abaixo foi gerada automaticamente — não é texto digitado pelo cliente.]\n\n${content}`;
+    case 'audio_transcription':
+      return `[O cliente enviou um áudio. A transcrição abaixo foi gerada automaticamente.]\n\n${content}`;
+    default:
+      return content;
+  }
+}
+
+// Prefixo curto para salvar no histórico Redis (legível nas próximas turns)
+function historyPrefix(type?: string): string {
+  switch (type) {
+    case 'image_analysis':     return '[Imagem] ';
+    case 'audio_transcription': return '[Áudio] ';
+    default:                   return '';
+  }
+}
+
 // ── Monta contexto das últimas mensagens para o Executor ──────
 function buildConversationContext(history: ChatMessage[]): string {
   const recent = history.slice(-6);
@@ -146,6 +169,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
+  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: req.system_prompt + OUTPUT_SCHEMA_SUFFIX },
@@ -155,7 +179,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
         ? `${m.content}\n[ferramentas acionadas: ${m.tools.join(', ')}]`
         : m.content,
     })),
-    { role: 'user', content: req.client_messages },
+    { role: 'user', content: formattedMessage },
   ];
 
   let totalIn = 0, totalOut = 0, rounds = 0;
@@ -221,6 +245,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
+  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type);
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
@@ -230,7 +255,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
         ? `${m.content}\n[ferramentas acionadas: ${m.tools.join(', ')}]`
         : m.content,
     })),
-    { role: 'user', content: req.client_messages },
+    { role: 'user', content: formattedMessage },
   ];
 
   let totalIn = 0, totalOut = 0, rounds = 0;
@@ -387,7 +412,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     ? result.executorTrace.tools_called.map((t) => t.tool)
     : undefined;
   await appendHistory(scopedClientId, [
-    { role: 'user',      content: req.client_messages },
+    { role: 'user',      content: historyPrefix(req.client_message_type) + req.client_messages },
     { role: 'assistant', content: assistantContent, tools: toolsUsed },
   ]);
 

@@ -11,10 +11,11 @@ export interface ChatRequest {
   lead_id: string;
   contact_phone: string;
   scoped_client_id: string;
-  client_messages: string;       // mensagem(ns) do cliente já formatada(s)
+  client_messages: string;            // mensagem(ns) do cliente já formatada(s)
+  client_message_type?: 'text' | 'image_analysis' | 'audio_transcription'; // tipo da mensagem
   model_provider: ModelProvider;
   model_name: string;
-  system_prompt: string;         // montado pelo n8n com dados do usuário/empresa/CRM
+  system_prompt: string;              // montado pelo n8n com dados do usuário/empresa/CRM
   tenant_id?: string;
 }
 

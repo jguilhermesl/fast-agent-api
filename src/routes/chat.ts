@@ -8,16 +8,17 @@ export const chatRouter = Router();
 // ── Request validation ────────────────────────────────────────
 
 const ChatRequestSchema = z.object({
-  agent_id:         z.string().min(1),
-  conversation_id:  z.string().min(1),
-  lead_id:          z.string().min(1),
-  contact_phone:    z.string().min(1),
-  scoped_client_id: z.string().min(1),
-  client_messages:  z.string().min(1),
-  model_provider:   z.enum(['openai', 'anthropic', 'gemini']).default('openai'),
-  model_name:       z.string().default('gpt-4.1-mini'),
-  system_prompt:    z.string().min(1),
-  tenant_id:        z.string().optional(),
+  agent_id:             z.string().min(1),
+  conversation_id:      z.string().min(1),
+  lead_id:              z.string().min(1),
+  contact_phone:        z.string().min(1),
+  scoped_client_id:     z.string().min(1),
+  client_messages:      z.string().min(1),
+  client_message_type:  z.enum(['text', 'image_analysis', 'audio_transcription']).default('text'),
+  model_provider:       z.enum(['openai', 'anthropic', 'gemini']).default('openai'),
+  model_name:           z.string().default('gpt-4.1-mini'),
+  system_prompt:        z.string().min(1),
+  tenant_id:            z.string().optional(),
 });
 
 // ── Auth middleware ────────────────────────────────────────────
