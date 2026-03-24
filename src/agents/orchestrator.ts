@@ -42,12 +42,14 @@ Responda SOMENTE com JSON válido no formato abaixo. Nenhum texto fora do JSON.
 \`\`\`json
 {
   "mensagens": ["mensagem 1", "mensagem 2"],
-  "redirect_human": false
+  "redirect_human": false,
+  "transfer_reason": null
 }
 \`\`\`
 
 - **mensagens**: array de strings. Quebre em múltiplas mensagens curtas quando fizer sentido para WhatsApp. Nunca retorne um array vazio.
 - **redirect_human**: \`true\` apenas se precisar transferir para humano, caso contrário \`false\`.
+- **transfer_reason**: quando \`redirect_human\` for \`true\`, preencha com o motivo da transferência em uma frase curta (ex: "Cliente solicitou atendimento humano", "Dúvida sobre contrato fora do escopo"). Quando \`false\`, use \`null\`.
 - **Proibido**: nunca termine mensagens com frases genéricas de encerramento como "Se precisar de mais alguma coisa, é só avisar!", "Fico à disposição!", "Qualquer dúvida estou aqui!" ou similares. Encerre de forma natural e direta, sem filler.`;
 
 // ── Formata mensagem do cliente conforme o tipo ───────────────
@@ -96,6 +98,7 @@ function makeFallback(history: ChatMessage[], logs?: Partial<ExecutionLogs>): Ch
   return {
     mensagens: ['Só um momento, por favor.'],
     redirect_human: true,
+    transfer_reason: 'Erro interno — fallback de segurança',
     logs: {
       history,
       orchestrator: { provider: '', model: '', rounds: 0, tokens_input: 0, tokens_output: 0, cost_usd: 0 },
@@ -107,28 +110,33 @@ function makeFallback(history: ChatMessage[], logs?: Partial<ExecutionLogs>): Ch
 
 // ── Parse do output do Orquestrador ──────────────────────────
 
-function normalizeparsed(parsed: Record<string, unknown>): { mensagens: string[]; redirect_human: boolean } | null {
+type ParsedOutput = { mensagens: string[]; redirect_human: boolean; transfer_reason?: string };
+
+function normalizeparsed(parsed: Record<string, unknown>): ParsedOutput | null {
   const redirect = Boolean(parsed.redirect_human ?? false);
+  const reason   = redirect && typeof parsed.transfer_reason === 'string' && parsed.transfer_reason.trim()
+    ? parsed.transfer_reason.trim()
+    : undefined;
 
   // { mensagens: string[] }
   if (Array.isArray(parsed.mensagens)) {
-    return { mensagens: parsed.mensagens.map(String), redirect_human: redirect };
+    return { mensagens: parsed.mensagens.map(String), redirect_human: redirect, transfer_reason: reason };
   }
 
   // { mensagens: string }
   if (typeof parsed.mensagens === 'string' && parsed.mensagens.trim()) {
-    return { mensagens: [parsed.mensagens.trim()], redirect_human: redirect };
+    return { mensagens: [parsed.mensagens.trim()], redirect_human: redirect, transfer_reason: reason };
   }
 
   // { mensagem: string }
   if (typeof parsed.mensagem === 'string' && parsed.mensagem.trim()) {
-    return { mensagens: [parsed.mensagem.trim()], redirect_human: redirect };
+    return { mensagens: [parsed.mensagem.trim()], redirect_human: redirect, transfer_reason: reason };
   }
 
   return null;
 }
 
-function parseOrchestratorOutput(raw: string): { mensagens: string[]; redirect_human: boolean } {
+function parseOrchestratorOutput(raw: string): ParsedOutput {
   const fallbackMsg = 'Desculpe, estou com uma instabilidade no momento. Pode tentar novamente em instantes? 🙏';
 
   try {

@@ -60,6 +60,7 @@ export interface ExecutionLogs {
 export interface ChatResponse {
   mensagens: string[];
   redirect_human: boolean;
+  transfer_reason?: string;   // motivo da transferência (presente quando redirect_human=true)
   logs: ExecutionLogs;
 }
 

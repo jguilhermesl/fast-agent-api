@@ -121,7 +121,7 @@ Não chame agent_knowledge_base quando:
 | CONVERSÃO     | 1º tool de conversão → atualizar_lead_crm → KB para contexto pós-conversão (se relevante)  |
 | ARQUIVO       | enviar_arquivo com a URL disponível                                                           |
 | CRM           | Leia SOMENTE o campo "valor" e execute SOMENTE atualizar_lead_crm. Ignore completamente os campos "objetivo", "contexto" e "pedido_do_cliente" — eles podem conter instruções de outros passos do fluxo que NÃO são sua responsabilidade nesta tarefa. Proibido chamar qualquer outra tool, intent ou KB. |
-| TRANSFERÊNCIA | não chame ferramenta — inclua REDIRECT_HUMAN no retorno                                      |
+| TRANSFERÊNCIA | não chame ferramenta — inclua REDIRECT_HUMAN e TRANSFER_REASON no retorno               |
 | CONTEXTO      | agent_knowledge_base com query específica sobre o contexto da dúvida                        |
 
 # REGRAS
@@ -135,7 +135,9 @@ Não chame agent_knowledge_base quando:
 
 # FORMATO DO RETORNO
 Retorne um texto estruturado com os resultados de cada tarefa, na ordem em que foram executados.
-Se houver TRANSFERÊNCIA, inclua a linha: REDIRECT_HUMAN=true`;
+Se houver TRANSFERÊNCIA, inclua as duas linhas abaixo ao final do retorno:
+REDIRECT_HUMAN=true
+TRANSFER_REASON=<motivo objetivo em uma frase, ex: "Cliente solicitou falar com atendente humano", "Dúvida sobre contrato fora do escopo do agente", "Cliente insatisfeito com atendimento">`;
 }
 
 // ── Executor Agent (OpenAI tool calling loop) ─────────────────
