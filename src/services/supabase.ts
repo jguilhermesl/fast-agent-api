@@ -137,6 +137,45 @@ export async function getConversationContext(
   };
 }
 
+/**
+ * Alternative lookup: find a conversation by agent_id + contact phone.
+ * Returns the most recent lead that matches.
+ */
+export async function getConversationContextByPhone(
+  agentId: string,
+  phone: string,
+): Promise<ConversationContext | null> {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('id, last_message_at, channel:channels!inner(provider, credentials, agent_id), contact:contacts!inner(phone)')
+    .eq('channels.agent_id', agentId)
+    .eq('contacts.phone', phone)
+    .order('last_message_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error('[Supabase] getConversationContextByPhone error:', error?.message);
+    return null;
+  }
+
+  const raw = data as unknown as {
+    id: string;
+    last_message_at: string | null;
+    channel: { provider: string; credentials: Record<string, string>; agent_id: string } | null;
+    contact: { phone: string } | null;
+  };
+
+  if (!raw.channel) return null;
+
+  return {
+    id: raw.id,
+    last_message_at: raw.last_message_at,
+    channel: { provider: raw.channel.provider, credentials: raw.channel.credentials },
+    contact: raw.contact,
+  };
+}
+
 // ── Send-external: message persistence ────────────────────────
 
 export interface MessageAttachment {

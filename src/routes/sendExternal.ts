@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { config } from '../config';
 import {
   getConversationContext,
+  getConversationContextByPhone,
   insertMessage,
   updateMessageStatus,
   updateLeadLastMessageAt,
@@ -14,13 +15,19 @@ export const sendExternalRouter = Router();
 
 // ── Request validation ────────────────────────────────────────
 
-const SendExternalSchema = z.object({
-  conversation_id: z.string().min(1),
-  phone:           z.string().optional(),
-  content:         z.string().default(''),
-  type:            z.string().default('text'),
-  media_url:       z.string().optional(),
-});
+const SendExternalSchema = z
+  .object({
+    conversation_id: z.string().min(1).optional(),
+    agent_id:        z.string().min(1).optional(),
+    phone:           z.string().optional(),
+    content:         z.string().default(''),
+    type:            z.string().default('text'),
+    media_url:       z.string().optional(),
+  })
+  .refine(
+    (d) => !!d.conversation_id || (!!d.agent_id && !!d.phone),
+    { message: 'Provide either conversation_id OR both agent_id and phone' },
+  );
 
 // ── Auth middleware ────────────────────────────────────────────
 
@@ -47,7 +54,7 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
     return;
   }
 
-  const { conversation_id, phone: bodyPhone, content, type, media_url } = parsed.data;
+  const { conversation_id, agent_id, phone: bodyPhone, content, type, media_url } = parsed.data;
   const isMediaType = type && type !== 'text';
 
   if (!content && !isMediaType) {
@@ -57,7 +64,14 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
 
   // ── Fetch conversation context (leads + channel + contact) ──
 
-  const conv = await getConversationContext(conversation_id);
+  let conv;
+  if (conversation_id) {
+    conv = await getConversationContext(conversation_id);
+  } else {
+    // agent_id + phone guaranteed by .refine() above
+    conv = await getConversationContextByPhone(agent_id!, bodyPhone!);
+  }
+
   if (!conv) {
     res.status(404).json({ error: 'Conversation not found' });
     return;
@@ -95,8 +109,10 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
 
   // ── Persist message with status "sending" ───────────────────
 
+  const resolvedConvId = conv.id;
+
   const msgRow = await insertMessage({
-    conversation_id,
+    conversation_id: resolvedConvId,
     content: content || '',
     direction: 'outbound',
     message_type: type,
@@ -113,7 +129,7 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
 
   // Update last_message_at (fire and forget)
   const now = new Date().toISOString();
-  updateLeadLastMessageAt(conversation_id, now).catch((e: unknown) =>
+  updateLeadLastMessageAt(resolvedConvId, now).catch((e: unknown) =>
     console.error('[send-external] lead update error:', e),
   );
 
@@ -140,7 +156,7 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
       });
 
       console.log(
-        `[send-external] ✅ Sent msg=${messageId} conv=${conversation_id} provider=${channel.provider} provider_id=${result.providerMessageId}`,
+        `[send-external] ✅ Sent msg=${messageId} conv=${resolvedConvId} provider=${channel.provider} provider_id=${result.providerMessageId}`,
       );
 
       res.json({ ok: true, message_id: messageId, status: 'sent', provider_message_id: result.providerMessageId });
@@ -151,7 +167,7 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
       });
 
       console.error(
-        `[send-external] ❌ Send failed msg=${messageId} conv=${conversation_id} error=${result.error}`,
+        `[send-external] ❌ Send failed msg=${messageId} conv=${resolvedConvId} error=${result.error}`,
       );
 
       res.status(502).json({ ok: false, message_id: messageId, status: 'failed', error: result.error });
