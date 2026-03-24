@@ -47,7 +47,8 @@ Responda SOMENTE com JSON válido no formato abaixo. Nenhum texto fora do JSON.
 \`\`\`
 
 - **mensagens**: array de strings. Quebre em múltiplas mensagens curtas quando fizer sentido para WhatsApp. Nunca retorne um array vazio.
-- **redirect_human**: \`true\` apenas se precisar transferir para humano, caso contrário \`false\`.`;
+- **redirect_human**: \`true\` apenas se precisar transferir para humano, caso contrário \`false\`.
+- **Proibido**: nunca termine mensagens com frases genéricas de encerramento como "Se precisar de mais alguma coisa, é só avisar!", "Fico à disposição!", "Qualquer dúvida estou aqui!" ou similares. Encerre de forma natural e direta, sem filler.`;
 
 // ── Formata mensagem do cliente conforme o tipo ───────────────
 // Garante que o LLM entenda que análises de imagem/áudio não são textos digitados pelo cliente.
