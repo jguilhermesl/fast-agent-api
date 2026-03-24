@@ -138,6 +138,28 @@ export async function getConversationContext(
 }
 
 /**
+ * Lookup channel credentials by agent_id alone (no conversation needed).
+ * Used when sending a first-contact message with no existing lead.
+ */
+export async function getChannelByAgentId(
+  agentId: string,
+): Promise<{ provider: string; credentials: Record<string, string> } | null> {
+  const { data, error } = await supabase
+    .from('channels')
+    .select('provider, credentials')
+    .eq('agent_id', agentId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error('[Supabase] getChannelByAgentId error:', error?.message);
+    return null;
+  }
+
+  return data as { provider: string; credentials: Record<string, string> };
+}
+
+/**
  * Alternative lookup: find a conversation by agent_id + contact phone.
  * Returns the most recent lead that matches.
  */
@@ -154,10 +176,11 @@ export async function getConversationContextByPhone(
     .limit(1)
     .maybeSingle();
 
-  if (error || !data) {
-    console.error('[Supabase] getConversationContextByPhone error:', error?.message);
+  if (error) {
+    console.error('[Supabase] getConversationContextByPhone error:', error.message);
     return null;
   }
+  if (!data) return null;
 
   const raw = data as unknown as {
     id: string;

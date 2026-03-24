@@ -4,6 +4,7 @@ import { config } from '../config';
 import {
   getConversationContext,
   getConversationContextByPhone,
+  getChannelByAgentId,
   insertMessage,
   updateMessageStatus,
   updateLeadLastMessageAt,
@@ -72,20 +73,24 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
     conv = await getConversationContextByPhone(agent_id!, bodyPhone!);
   }
 
-  if (!conv) {
-    res.status(404).json({ error: 'Conversation not found' });
-    return;
-  }
-
-  const channel = conv.channel;
+  // Se não encontrou conversa, tenta buscar canal pelo agent_id (primeiro contato)
+  let channel: { provider: string; credentials: Record<string, string> } | null = conv?.channel ?? null;
   if (!channel) {
-    res.status(400).json({ error: 'No channel linked to this conversation' });
-    return;
+    if (!agent_id) {
+      res.status(404).json({ error: 'Conversation not found and no agent_id provided to resolve channel' });
+      return;
+    }
+    channel = await getChannelByAgentId(agent_id);
+    if (!channel) {
+      res.status(404).json({ error: 'No channel found for this agent_id' });
+      return;
+    }
+    console.log(`[send-external] No conversation found — sending first-contact via agent_id=${agent_id}`);
   }
 
-  const targetPhone = bodyPhone || conv.contact?.phone;
+  const targetPhone = bodyPhone || conv?.contact?.phone;
   if (!targetPhone) {
-    res.status(400).json({ error: 'No phone number available for this conversation' });
+    res.status(400).json({ error: 'No phone number available' });
     return;
   }
 
@@ -109,29 +114,33 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
 
   // ── Persist message with status "sending" ───────────────────
 
-  const resolvedConvId = conv.id;
+  const resolvedConvId = conv?.id ?? null;
 
-  const msgRow = await insertMessage({
-    conversation_id: resolvedConvId,
-    content: content || '',
-    direction: 'outbound',
-    message_type: type,
-    attachments,
-    status: 'sending',
-  });
+  // Só persiste mensagem se houver conversa vinculada
+  let messageId: string | null = null;
+  if (resolvedConvId) {
+    const msgRow = await insertMessage({
+      conversation_id: resolvedConvId,
+      content: content || '',
+      direction: 'outbound',
+      message_type: type,
+      attachments,
+      status: 'sending',
+    });
 
-  if (!msgRow) {
-    res.status(500).json({ error: 'Failed to persist message' });
-    return;
+    if (!msgRow) {
+      res.status(500).json({ error: 'Failed to persist message' });
+      return;
+    }
+
+    messageId = msgRow.id;
+
+    // Update last_message_at (fire and forget)
+    const now = new Date().toISOString();
+    updateLeadLastMessageAt(resolvedConvId, now).catch((e: unknown) =>
+      console.error('[send-external] lead update error:', e),
+    );
   }
-
-  const messageId = msgRow.id;
-
-  // Update last_message_at (fire and forget)
-  const now = new Date().toISOString();
-  updateLeadLastMessageAt(resolvedConvId, now).catch((e: unknown) =>
-    console.error('[send-external] lead update error:', e),
-  );
 
   // ── Select adapter and send ──────────────────────────────────
 
@@ -150,24 +159,28 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
     );
 
     if (result.success) {
-      await updateMessageStatus(messageId, {
-        status:              'sent',
-        provider_message_id: result.providerMessageId || null,
-      });
+      if (messageId) {
+        await updateMessageStatus(messageId, {
+          status:              'sent',
+          provider_message_id: result.providerMessageId || null,
+        });
+      }
 
       console.log(
-        `[send-external] ✅ Sent msg=${messageId} conv=${resolvedConvId} provider=${channel.provider} provider_id=${result.providerMessageId}`,
+        `[send-external] ✅ Sent msg=${messageId ?? 'no-persist'} conv=${resolvedConvId ?? 'first-contact'} provider=${channel.provider} provider_id=${result.providerMessageId}`,
       );
 
       res.json({ ok: true, message_id: messageId, status: 'sent', provider_message_id: result.providerMessageId });
     } else {
-      await updateMessageStatus(messageId, {
-        status:   'failed',
-        metadata: { error: result.error },
-      });
+      if (messageId) {
+        await updateMessageStatus(messageId, {
+          status:   'failed',
+          metadata: { error: result.error },
+        });
+      }
 
       console.error(
-        `[send-external] ❌ Send failed msg=${messageId} conv=${resolvedConvId} error=${result.error}`,
+        `[send-external] ❌ Send failed msg=${messageId ?? 'no-persist'} conv=${resolvedConvId ?? 'first-contact'} error=${result.error}`,
       );
 
       res.status(502).json({ ok: false, message_id: messageId, status: 'failed', error: result.error });
@@ -175,10 +188,12 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
 
-    await updateMessageStatus(messageId, {
-      status:   'failed',
-      metadata: { error: errMsg },
-    });
+    if (messageId) {
+      await updateMessageStatus(messageId, {
+        status:   'failed',
+        metadata: { error: errMsg },
+      });
+    }
 
     console.error('[send-external] Adapter error:', errMsg);
     res.status(500).json({ ok: false, message_id: messageId, status: 'failed', error: errMsg });
