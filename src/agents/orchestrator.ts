@@ -120,7 +120,8 @@ function normalizeparsed(parsed: Record<string, unknown>): ParsedOutput | null {
 
   // { mensagens: string[] }
   if (Array.isArray(parsed.mensagens)) {
-    return { mensagens: parsed.mensagens.map(String), redirect_human: redirect, transfer_reason: reason };
+    const mensagens = parsed.mensagens.map(String).filter((m) => m.trim() !== '');
+    return { mensagens, redirect_human: redirect, transfer_reason: reason };
   }
 
   // { mensagens: string }
