@@ -50,7 +50,14 @@ Responda SOMENTE com JSON válido no formato abaixo. Nenhum texto fora do JSON.
 - **mensagens**: array de strings. Quebre em múltiplas mensagens curtas quando fizer sentido para WhatsApp. Nunca retorne um array vazio.
 - **redirect_human**: \`true\` apenas se precisar transferir para humano, caso contrário \`false\`.
 - **transfer_reason**: quando \`redirect_human\` for \`true\`, preencha com o motivo da transferência em uma frase curta (ex: "Cliente solicitou atendimento humano", "Dúvida sobre contrato fora do escopo"). Quando \`false\`, use \`null\`.
-- **Proibido**: nunca termine mensagens com frases genéricas de encerramento como "Se precisar de mais alguma coisa, é só avisar!", "Fico à disposição!", "Qualquer dúvida estou aqui!" ou similares. Encerre de forma natural e direta, sem filler.`;
+- **Proibido**: nunca termine mensagens com frases genéricas de encerramento como "Se precisar de mais alguma coisa, é só avisar!", "Fico à disposição!", "Qualquer dúvida estou aqui!" ou similares. Encerre de forma natural e direta, sem filler.
+
+## Regra de não-duplicação de intents
+Antes de incluir qualquer tarefa no array enviado ao executor, verifique o histórico da conversa.
+Mensagens anteriores do assistente contêm \`[ferramentas acionadas: nome_da_intent]\` quando uma intent foi executada.
+- Se uma intent já aparece no histórico como executada com os mesmos dados relevantes → **não inclua essa tarefa novamente**.
+- Só reacione a mesma intent se o cliente trouxe informações novas ou fez uma nova solicitação explícita sobre o mesmo tema.
+- Exemplo: se \`agendar_consulta\` já aparece no histórico e o cliente não pediu um novo agendamento, não inclua \`agendar_consulta\` nas tarefas.`;
 
 // ── Formata mensagem do cliente conforme o tipo ───────────────
 // Garante que o LLM entenda que análises de imagem/áudio não são textos digitados pelo cliente.
