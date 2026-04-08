@@ -202,7 +202,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     rounds = round + 1;
     const response = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
+      model: 'gpt-5.4-mini',
       messages,
       tools,
       tool_choice: 'auto',
