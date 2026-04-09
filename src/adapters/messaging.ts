@@ -258,8 +258,54 @@ export async function zapiSend(
           body = { phone: params.phone, audio: params.mediaUrl, delayTyping: params.delayTyping ?? 0 };
           break;
         case 'document':
-          endpoint = `${base}/send-document/${encodeURIComponent(params.content || 'arquivo')}`;
-          body = { phone: params.phone, document: params.mediaUrl, delayTyping: params.delayTyping ?? 0 };
+          // Extract file name and extension from URL
+          let fileName = 'documento';
+          let extension = 'pdf';
+          
+          console.log(`[Z-API] Processing document - mediaUrl: ${params.mediaUrl}, content: "${params.content}"`);
+          
+          if (params.mediaUrl) {
+            try {
+              // Parse URL to extract filename
+              const urlObj = new URL(params.mediaUrl);
+              const pathname = urlObj.pathname;
+              const fileNameFromUrl = pathname.split('/').pop() || '';
+              
+              console.log(`[Z-API] Extracted from URL - pathname: ${pathname}, filename: ${fileNameFromUrl}`);
+              
+              if (fileNameFromUrl) {
+                // Remove extension from filename
+                const parts = fileNameFromUrl.split('.');
+                if (parts.length > 1) {
+                  extension = parts.pop() || 'pdf';
+                  fileName = parts.join('.');
+                } else {
+                  fileName = fileNameFromUrl;
+                }
+                console.log(`[Z-API] After splitting - fileName: ${fileName}, extension: ${extension}`);
+              }
+            } catch (e) {
+              console.warn('[Z-API] Could not parse URL for filename, using defaults:', e);
+            }
+          }
+          
+          // Use params.content as fileName if provided (overrides URL extraction)
+          if (params.content && params.content.trim()) {
+            fileName = params.content.trim();
+            console.log(`[Z-API] Using content as fileName: ${fileName}`);
+          }
+          
+          // Z-API requires extension in the URL path
+          endpoint = `${base}/send-document/${extension}`;
+          body = { 
+            phone: params.phone, 
+            document: params.mediaUrl, 
+            fileName: fileName,
+            delayTyping: params.delayTyping ?? 0 
+          };
+          
+          console.log(`[Z-API] Final document endpoint: ${endpoint}`);
+          console.log(`[Z-API] Final document body:`, JSON.stringify(body, null, 2));
           break;
         default:
           // image and any other media type
