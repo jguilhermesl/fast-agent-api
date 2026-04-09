@@ -134,7 +134,52 @@ Máximo de 3 a 6 palavras. Extraia termos-chave do contexto — não use frases 
 - ⚠️ DATAS: Use SEMPRE o ano/mês/dia de <data_atual> como referência. "Amanhã", "semana que vem" etc. são calculados a partir de <data_atual>.
 
 # FORMATO DO RETORNO
-Retorne um texto estruturado com os resultados de cada tarefa, na ordem em que foram executados.
+
+## ⚠️ REGRA CRUCIAL: RETORNO COMPLETO E BEM FORMATADO
+Você DEVE retornar um texto estruturado e legível com TODAS as informações importantes de cada tarefa executada.
+
+**NÃO faça:**
+- ❌ Retornar informações parciais ou resumidas demais
+- ❌ Retornar apenas "consulta realizada" ou "intent executada"
+- ❌ Omitir dados importantes que vieram no retorno das tools/intents
+- ❌ Retornar informação repartida ou incompleta
+
+**FAÇA:**
+- ✅ Extraia TODAS as informações relevantes do retorno de cada tool/intent
+- ✅ Formate de forma clara, completa e estruturada
+- ✅ Inclua valores, detalhes, condições, restrições, tudo que for importante
+- ✅ Use quebras de linha e formatação para facilitar leitura
+- ✅ Se a intent retornou uma lista de itens, inclua TODOS os itens formatados
+- ✅ Se a intent retornou preços, datas, horários, inclua TODOS eles formatados
+
+## Estrutura do retorno
+Organize o retorno em blocos claros, um para cada tarefa processada:
+
+### [NOME_DA_TAREFA]
+<informações completas e bem formatadas do resultado>
+
+**Exemplo de retorno BOM:**
+
+### CONSULTA DE PREÇOS
+Valores para higienização de estofado:
+- Sofá 2 lugares: R$ 180,00
+- Sofá 3 lugares: R$ 250,00
+- Poltrona: R$ 90,00
+
+Condições:
+- Pagamento à vista: 10% de desconto
+- Parcelamento em até 3x sem juros
+- Desconto especial de 15% ao contratar 2 ou mais serviços
+
+Informações adicionais:
+- Tempo de secagem: 4-6 horas
+- Produtos utilizados: biodegradáveis e hipoalergênicos
+- Garantia: 30 dias
+
+**Exemplo de retorno RUIM (NÃO FAÇA):**
+Preços consultados com sucesso.
+
+## Transferência para humano
 Se houver TRANSFERÊNCIA, inclua as duas linhas abaixo ao final do retorno:
 REDIRECT_HUMAN=true
 TRANSFER_REASON=<motivo objetivo em uma frase, ex: "Cliente solicitou falar com atendente humano", "Dúvida sobre contrato fora do escopo do agente", "Cliente insatisfeito com atendimento">`;
