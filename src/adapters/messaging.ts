@@ -258,7 +258,6 @@ export async function zapiSend(
           body = { phone: params.phone, audio: params.mediaUrl, delayTyping: params.delayTyping ?? 0 };
           break;
         case 'document':
-          // Extract file name and extension from URL
           let fileName = 'documento';
           let extension = 'pdf';
           
