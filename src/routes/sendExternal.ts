@@ -11,6 +11,7 @@ import {
   type MessageAttachment,
 } from '../services/supabase';
 import { getAdapter } from '../adapters/messaging';
+import { appendHistory } from '../memory/redis';
 
 export const sendExternalRouter = Router();
 
@@ -48,6 +49,9 @@ function authMiddleware(req: Request, res: Response, next: () => void) {
 // ── POST /api/send-external ───────────────────────────────────
 
 sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
+  // Check if this call should skip Redis (e.g., from n8n after /api/chat already saved to Redis)
+  const skipRedis = req.headers['x-skip-redis'] === 'true';
+
   // Validate body
   const parsed = SendExternalSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -164,6 +168,33 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
           status:              'sent',
           provider_message_id: result.providerMessageId || null,
         });
+      }
+
+      // ── Save to Redis if not from n8n (external API call) ──────
+      if (!skipRedis && agent_id && targetPhone) {
+        const scopedClientId = `${agent_id}:${targetPhone}`;
+        
+        // Format content for Redis with media type prefix (similar to orchestrator logic)
+        let redisContent = content || '';
+        if (type === 'image') {
+          redisContent = '[Imagem] ' + redisContent;
+        } else if (type === 'video') {
+          redisContent = '[Vídeo] ' + redisContent;
+        } else if (type === 'audio' || type === 'ptt') {
+          redisContent = '[Áudio] ' + redisContent;
+        } else if (type === 'document') {
+          redisContent = '[Documento] ' + redisContent;
+        }
+        
+        try {
+          await appendHistory(scopedClientId, [
+            { role: 'assistant', content: redisContent }
+          ]);
+          console.log(`[send-external] 💾 Saved to Redis: ${scopedClientId}`);
+        } catch (redisErr: unknown) {
+          // Log error but don't fail the request
+          console.error('[send-external] Redis save error:', redisErr instanceof Error ? redisErr.message : String(redisErr));
+        }
       }
 
       console.log(
