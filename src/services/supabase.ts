@@ -96,6 +96,7 @@ export async function logError(params: {
 
 export interface ConversationContext {
   id: string;
+  agent_id: string;
   last_message_at: string | null;
   channel: {
     provider: string;
@@ -111,7 +112,7 @@ export async function getConversationContext(
 ): Promise<ConversationContext | null> {
   const { data, error } = await supabase
     .from('leads')
-    .select('id, last_message_at, channel:channels(provider, credentials), contact:contacts(phone)')
+    .select('id, agent_id, last_message_at, channel:channels(provider, credentials), contact:contacts(phone)')
     .eq('id', conversationId)
     .single();
 
@@ -122,6 +123,7 @@ export async function getConversationContext(
 
   const raw = data as unknown as {
     id: string;
+    agent_id: string;
     last_message_at: string | null;
     channel: { provider: string; credentials: Record<string, string> } | null;
     contact: { phone: string } | null;
@@ -131,6 +133,7 @@ export async function getConversationContext(
 
   return {
     id: raw.id,
+    agent_id: raw.agent_id,
     last_message_at: raw.last_message_at,
     channel: raw.channel,
     contact: raw.contact,
@@ -169,8 +172,8 @@ export async function getConversationContextByPhone(
 ): Promise<ConversationContext | null> {
   const { data, error } = await supabase
     .from('leads')
-    .select('id, last_message_at, channel:channels!inner(provider, credentials, agent_id), contact:contacts!inner(phone)')
-    .eq('channels.agent_id', agentId)
+    .select('id, agent_id, last_message_at, channel:channels!inner(provider, credentials), contact:contacts!inner(phone)')
+    .eq('agent_id', agentId)
     .eq('contacts.phone', phone)
     .order('last_message_at', { ascending: false })
     .limit(1)
@@ -184,8 +187,9 @@ export async function getConversationContextByPhone(
 
   const raw = data as unknown as {
     id: string;
+    agent_id: string;
     last_message_at: string | null;
-    channel: { provider: string; credentials: Record<string, string>; agent_id: string } | null;
+    channel: { provider: string; credentials: Record<string, string> } | null;
     contact: { phone: string } | null;
   };
 
@@ -193,8 +197,9 @@ export async function getConversationContextByPhone(
 
   return {
     id: raw.id,
+    agent_id: raw.agent_id,
     last_message_at: raw.last_message_at,
-    channel: { provider: raw.channel.provider, credentials: raw.channel.credentials },
+    channel: raw.channel,
     contact: raw.contact,
   };
 }

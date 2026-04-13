@@ -171,8 +171,11 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
       }
 
       // ── Save to Redis if not from n8n (external API call) ──────
-      if (!skipRedis && agent_id && targetPhone) {
-        const scopedClientId = `${agent_id}:${targetPhone}`;
+      // Use agent_id from body OR from the loaded conversation
+      const resolvedAgentId = agent_id || conv?.agent_id;
+      
+      if (!skipRedis && resolvedAgentId && targetPhone) {
+        const scopedClientId = `${resolvedAgentId}:${targetPhone}`;
         
         // Format content for Redis with media type prefix (similar to orchestrator logic)
         let redisContent = content || '';
@@ -190,11 +193,13 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
           await appendHistory(scopedClientId, [
             { role: 'assistant', content: redisContent }
           ]);
-          console.log(`[send-external] 💾 Saved to Redis: ${scopedClientId}`);
+          console.log(`[send-external] 💾 Saved to Redis: ${scopedClientId} | skipRedis=${skipRedis}`);
         } catch (redisErr: unknown) {
           // Log error but don't fail the request
           console.error('[send-external] Redis save error:', redisErr instanceof Error ? redisErr.message : String(redisErr));
         }
+      } else if (!skipRedis) {
+        console.log(`[send-external] ⚠️ Skipping Redis save - agent_id=${resolvedAgentId}, phone=${targetPhone}, skipRedis=${skipRedis}`);
       }
 
       console.log(
