@@ -57,8 +57,29 @@ async function whatsbizapiSendText(
     };
   } catch (e: unknown) {
     if (axios.isAxiosError(e)) {
-      const errMsg = (e.response?.data as Record<string, unknown>)?.error ?? e.message;
-      console.error(`[WhatsBizAPI] ❌ Text send failed: ${errMsg}`);
+      const status = e.response?.status;
+      const responseData = e.response?.data;
+      const errMsg = (responseData as Record<string, unknown>)?.error ?? e.message;
+      
+      // Mask token for security (show only first 7 chars)
+      const maskedToken = token ? `${token.substring(0, 7)}***` : 'N/A';
+      
+      console.error(`[WhatsBizAPI] ❌ Text send failed with status ${status}`);
+      console.error(`[WhatsBizAPI] Error details:`, JSON.stringify({
+        status,
+        statusText: e.response?.statusText,
+        errorMessage: errMsg,
+        responseBody: responseData,
+        requestEndpoint: e.config?.url,
+        phone,
+        tokenUsed: maskedToken,
+      }, null, 2));
+      
+      // Specific handling for 401 Unauthorized
+      if (status === 401) {
+        return { success: false, error: `Unauthorized (401): Invalid or expired token. Message: ${errMsg}` };
+      }
+      
       return { success: false, error: String(errMsg) };
     }
     console.error(`[WhatsBizAPI] ❌ Text send failed: ${String(e)}`);
@@ -120,17 +141,26 @@ async function whatsbizapiSendMedia(
       const responseData = e.response?.data;
       const errorMsg = (responseData as Record<string, unknown>)?.error ?? e.message;
       
+      // Mask token for security (show only first 7 chars)
+      const maskedToken = token ? `${token.substring(0, 7)}***` : 'N/A';
+      
       console.error(`[WhatsBizAPI] ❌ ${type} send failed with status ${status}`);
       console.error(`[WhatsBizAPI] Error details:`, JSON.stringify({
         status,
         statusText: e.response?.statusText,
-        error: errorMsg,
-        responseData,
+        errorMessage: errorMsg,
+        responseBody: responseData,
         requestUrl: e.config?.url,
         phone,
         type,
         mediaUrl: url?.substring(0, 100),
+        tokenUsed: maskedToken,
       }, null, 2));
+      
+      // Specific handling for 401 Unauthorized
+      if (status === 401) {
+        return { success: false, error: `Unauthorized (401): Invalid or expired token. Message: ${errorMsg}` };
+      }
       
       // WhatsBizAPI sometimes returns 500 but message is sent successfully
       // Treat 500 errors as success with a warning
@@ -326,9 +356,35 @@ export async function zapiSend(
     };
   } catch (e: unknown) {
     if (axios.isAxiosError(e)) {
-      const msg = (e.response?.data as Record<string, unknown>)?.error ?? e.message;
-      return { success: false, error: String(msg) };
+      const status = e.response?.status;
+      const responseData = e.response?.data;
+      const errorMsg = (responseData as Record<string, unknown>)?.error ?? e.message;
+      
+      // Mask sensitive credentials for security
+      const maskedInstanceId = instanceId ? `${instanceId.substring(0, 7)}***` : 'N/A';
+      const maskedToken = token ? `${token.substring(0, 7)}***` : 'N/A';
+      
+      console.error(`[Z-API] ❌ Send failed with status ${status}`);
+      console.error(`[Z-API] Error details:`, JSON.stringify({
+        status,
+        statusText: e.response?.statusText,
+        errorMessage: errorMsg,
+        responseBody: responseData,
+        requestEndpoint: e.config?.url,
+        phone: params.phone,
+        messageType: params.type,
+        instanceIdUsed: maskedInstanceId,
+        tokenUsed: maskedToken,
+      }, null, 2));
+      
+      // Specific handling for 401 Unauthorized
+      if (status === 401) {
+        return { success: false, error: `Unauthorized (401): Invalid or expired Z-API credentials. Message: ${errorMsg}` };
+      }
+      
+      return { success: false, error: String(errorMsg) };
     }
+    console.error(`[Z-API] ❌ Send failed:`, String(e));
     return { success: false, error: String(e) };
   }
 }

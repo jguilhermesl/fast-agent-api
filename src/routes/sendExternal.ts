@@ -216,13 +216,14 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
       }
 
       console.error(
-        `[send-external] ❌ Send failed msg=${messageId ?? 'no-persist'} conv=${resolvedConvId ?? 'first-contact'} error=${result.error}`,
+        `[send-external] ❌ Send failed msg=${messageId ?? 'no-persist'} conv=${resolvedConvId ?? 'first-contact'} provider=${channel.provider} error=${result.error}`,
       );
 
       res.status(502).json({ ok: false, message_id: messageId, status: 'failed', error: result.error });
     }
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
+    const errStack = e instanceof Error ? e.stack : undefined;
 
     if (messageId) {
       await updateMessageStatus(messageId, {
@@ -231,7 +232,16 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
       });
     }
 
-    console.error('[send-external] Adapter error:', errMsg);
+    console.error('[send-external] ❌ Adapter exception:', {
+      error: errMsg,
+      stack: errStack,
+      provider: channel.provider,
+      phone: targetPhone,
+      messageType: type,
+      conversationId: resolvedConvId,
+      messageId,
+    });
+    
     res.status(500).json({ ok: false, message_id: messageId, status: 'failed', error: errMsg });
   }
 });
