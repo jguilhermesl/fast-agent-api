@@ -96,9 +96,10 @@ Antes de chamar uma intent, consulte \`<acoes_executadas>\`.
 Se existe uma tool específica para a tarefa, execute-a PRIMEIRO — mas somente após validar os dados (regra de ouro acima).
 Nunca substitua uma intent específica pela agent_knowledge_base.
 
-## Regra 2 — KB apenas quando agrega valor real
-Chame agent_knowledge_base após uma intent somente se a intent retornou dados insuficientes e há informações complementares relevantes na KB (ex: condições especiais, restrições, regras de negócio adicionais).
-**Não chame KB de forma especulativa** ("o cliente provavelmente vai perguntar") — isso gera tokens desnecessários.
+## Regra 2 — KB obrigatória para CONSULTA/CONTEXTO; condicional para outros tipos
+- Tarefa **CONSULTA** ou **CONTEXTO**: chame agent_knowledge_base SEMPRE — é a fonte principal dessas tarefas. Não aguarde uma intent primeiro.
+- Outros tipos (AÇÃO, AGENDAMENTO, VENDA, CONVERSÃO): chame KB após a intent somente se a intent retornou dados insuficientes e há informações complementares relevantes na KB.
+**Não chame KB de forma especulativa em tarefas que não sejam CONSULTA/CONTEXTO.**
 
 ## Regra 3 — Query da KB deve ser curta e baseada em palavras-chave
 Máximo de 3 a 6 palavras. Extraia termos-chave do contexto — não use frases completas.

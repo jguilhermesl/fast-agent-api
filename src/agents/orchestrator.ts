@@ -22,11 +22,28 @@ const GREETING_PATTERNS = [
   /^(tchau|até mais|ate mais|até logo|ate logo|adeus|flw|falou|valeu|obrigad[oa]|muito obrigad[oa]|thanks|thank you)\b/i,
 ];
 
+const OBJECTION_PATTERNS = [
+  /não[,\s]+(obrigad[oa]|quero|preciso|tenho interesse|vou|posso)/i,
+  /nao[,\s]+(obrigad[oa]|quero|preciso|tenho interesse|vou|posso)/i,
+  /(tá|ta|está|esta)\s+caro/i,
+  /(é|e)\s+longe|fica\s+longe|muito\s+longe/i,
+  /vou\s+ver\s+depois|deixa\s+pra\s+depois|depois\s+(eu\s+)?falo|vou\s+pensar|deixa\s+eu\s+pensar/i,
+  /não\s+preciso|nao\s+preciso|não\s+quero|nao\s+quero/i,
+  /deixa\s+pra\s+lá|deixa\s+pra\s+la|esquece|desisti/i,
+  /outro\s+momento|não\s+é\s+pra\s+mim|nao\s+e\s+pra\s+mim/i,
+];
+
 function isGreetingOrFarewell(message: string): boolean {
   const trimmed = message.trim();
   // Só aplica a mensagens curtas — saudações puras raramente passam de 50 chars
   if (trimmed.length > 50) return false;
   return GREETING_PATTERNS.some((p) => p.test(trimmed));
+}
+
+function isObjection(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length > 200) return false;
+  return OBJECTION_PATTERNS.some((p) => p.test(trimmed));
 }
 
 // ── Schema de output injetado no system_prompt ────────────────
@@ -62,6 +79,9 @@ function formatClientMessage(content: string, type?: string): string {
     case 'audio_transcription':
       return `[O cliente enviou um áudio. A transcrição abaixo foi gerada automaticamente.]\n\n${content}`;
     default:
+      if (isObjection(content)) {
+        return `[PRÉ-CLASSIFICAÇÃO AUTOMÁTICA: OBJEÇÃO (categoria A) — aplique as regras de tratamento de objeção da PERSONA. NÃO encerre a conversa. NÃO acione "Encerrar conversa".]\n\n${content}`;
+      }
       return content;
   }
 }
