@@ -175,9 +175,30 @@ function parseOrchestratorOutput(raw: string): ParsedOutput {
     }
   } catch {}
 
+  // JSON malformado: resgata os textos do array "mensagens" antes de desistir.
+  const bloco = raw.match(/"mensagens"\s*:\s*\[([\s\S]*?)\]/);
+  if (bloco) {
+    const textos = [...bloco[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+      .map((m) => m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim())
+      .filter((t) => t !== '');
+    if (textos.length) {
+      return {
+        mensagens: textos,
+        redirect_human: /"redirect_human"\s*:\s*true/.test(raw),
+      };
+    }
+  }
+
   const text = raw.trim();
+
+  // Se ainda parece JSON, não pode ir para o cliente.
+  if (!text || text.startsWith('{') || text.startsWith('[') || text.includes('"redirect_human"')) {
+    console.error('[Orchestrator] Saída não parseável:', text.slice(0, 500));
+    return { mensagens: [fallbackMsg], redirect_human: false };
+  }
+
   return {
-    mensagens: text ? [text] : [fallbackMsg],
+    mensagens: [text],
     redirect_human: false,
   };
 }
