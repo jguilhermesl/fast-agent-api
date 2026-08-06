@@ -191,8 +191,13 @@ function parseOrchestratorOutput(raw: string): ParsedOutput {
 
   const text = raw.trim();
 
-  // Se ainda parece JSON, não pode ir para o cliente.
-  if (!text || text.startsWith('{') || text.startsWith('[') || text.includes('"redirect_human"')) {
+  // Se ainda parece JSON, não pode ir para o cliente. Um texto legítimo pode
+  // começar com "{" ou "[" (ex.: "[IMPORTANTE] chegue 15 min antes"), então só
+  // barra o que tem cara de objeto de saída: campo conhecido, ou objeto fechado
+  // com par "chave": valor.
+  const temCampoConhecido = /"(mensagens|mensagem|redirect_human|transfer_reason)"\s*:/.test(text);
+  const objetoFechado = text.startsWith('{') && text.endsWith('}') && /"[^"]+"\s*:/.test(text);
+  if (!text || temCampoConhecido || objetoFechado) {
     console.error('[Orchestrator] Saída não parseável:', text.slice(0, 500));
     return { mensagens: [fallbackMsg], redirect_human: false };
   }
