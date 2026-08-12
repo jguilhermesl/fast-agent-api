@@ -188,6 +188,8 @@ interface ProviderResult {
   output: string;
   tokensIn: number;
   tokensOut: number;
+  /** Parte de tokensIn que veio do cache de prompt. 0 quando o provider não informa. */
+  cachedIn?: number;
   model: string;
   rounds: number;
   executorTrace: ExecutorTrace;
@@ -212,7 +214,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
     { role: 'user', content: formattedMessage },
   ];
 
-  let totalIn = 0, totalOut = 0, rounds = 0;
+  let totalIn = 0, totalOut = 0, totalCached = 0, rounds = 0;
   const allExecutorTraces: ExecutorTrace[] = [];
   const communications: Array<{ query: string; result: string }> = [];
 
@@ -230,14 +232,16 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
     });
 
     const msg = response.choices[0].message;
-    totalIn  += response.usage?.prompt_tokens     ?? 0;
-    totalOut += response.usage?.completion_tokens ?? 0;
+    totalIn     += response.usage?.prompt_tokens     ?? 0;
+    totalOut    += response.usage?.completion_tokens ?? 0;
+    totalCached += response.usage?.prompt_tokens_details?.cached_tokens ?? 0;
 
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
       return {
         output: msg.content ?? '',
         tokensIn: totalIn,
         tokensOut: totalOut,
+        cachedIn: totalCached,
         model: response.model,
         rounds,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
@@ -418,7 +422,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   if (!result) return makeFallback(history);
 
   // Salva tokens
-  const costUsd = calcCostUsd(result.model, result.tokensIn, result.tokensOut);
+  const costUsd = calcCostUsd(result.model, result.tokensIn, result.tokensOut, result.cachedIn ?? 0);
   await saveTokenUsage({
     agent_id: req.agent_id,
     conversation_id: req.conversation_id,
@@ -431,7 +435,9 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     estimated_cost_usd: costUsd,
   });
 
-  console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} executorCalled=${result.executorTrace.called}`);
+  const cachedIn = result.cachedIn ?? 0;
+  const hitRate  = result.tokensIn > 0 ? Math.round((cachedIn / result.tokensIn) * 100) : 0;
+  console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} (cache ${cachedIn}, ${hitRate}%) tokensOut=${result.tokensOut} rounds=${result.rounds} cost=${costUsd} executorCalled=${result.executorTrace.called}`);
 
   const parsed = parseOrchestratorOutput(result.output);
 

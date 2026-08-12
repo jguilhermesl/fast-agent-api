@@ -61,15 +61,24 @@ export function inferModelProvider(modelName: string): string {
   return 'unknown';
 }
 
-export function calcCostUsd(model: string, tokensIn: number, tokensOut: number): number {
+// Tokens servidos do cache de prompt custam uma fração do input normal. A OpenAI
+// devolve quantos foram em usage.prompt_tokens_details.cached_tokens, e esse valor
+// JÁ ESTÁ somado em prompt_tokens — cobrar tudo a preço cheio infla o custo relatado.
+// Fonte do fator: openai.com/api/pricing (cached input a 10% do input).
+const CACHED_INPUT_FACTOR = 0.1;
+
+export function calcCostUsd(model: string, tokensIn: number, tokensOut: number, cachedIn = 0): number {
   // Match exato primeiro, depois por prefixo (ex: "gpt-4.1-mini-2025-04-14" → "gpt-4.1-mini")
   const rates =
     config.tokenCost[model] ??
     Object.entries(config.tokenCost).find(([key]) => model.startsWith(key))?.[1] ??
     { input: 0.000001, output: 0.000003 };
 
+  const cached = Math.min(Math.max(cachedIn, 0), tokensIn);
+  const fresh  = tokensIn - cached;
+
   return parseFloat(
-    ((tokensIn * rates.input) + (tokensOut * rates.output)).toFixed(8)
+    ((fresh * rates.input) + (cached * rates.input * CACHED_INPUT_FACTOR) + (tokensOut * rates.output)).toFixed(8)
   );
 }
 
