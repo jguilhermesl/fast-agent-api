@@ -175,9 +175,35 @@ function parseOrchestratorOutput(raw: string): ParsedOutput {
     }
   } catch {}
 
+  // JSON malformado: resgata os textos do array "mensagens" antes de desistir.
+  const bloco = raw.match(/"mensagens"\s*:\s*\[([\s\S]*?)\]/);
+  if (bloco) {
+    const textos = [...bloco[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+      .map((m) => m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim())
+      .filter((t) => t !== '');
+    if (textos.length) {
+      return {
+        mensagens: textos,
+        redirect_human: /"redirect_human"\s*:\s*true/.test(raw),
+      };
+    }
+  }
+
   const text = raw.trim();
+
+  // Se ainda parece JSON, não pode ir para o cliente. Um texto legítimo pode
+  // começar com "{" ou "[" (ex.: "[IMPORTANTE] chegue 15 min antes"), então só
+  // barra o que tem cara de objeto de saída: campo conhecido, ou objeto fechado
+  // com par "chave": valor.
+  const temCampoConhecido = /"(mensagens|mensagem|redirect_human|transfer_reason)"\s*:/.test(text);
+  const objetoFechado = text.startsWith('{') && text.endsWith('}') && /"[^"]+"\s*:/.test(text);
+  if (!text || temCampoConhecido || objetoFechado) {
+    console.error('[Orchestrator] Saída não parseável:', text.slice(0, 500));
+    return { mensagens: [fallbackMsg], redirect_human: false };
+  }
+
   return {
-    mensagens: text ? [text] : [fallbackMsg],
+    mensagens: [text],
     redirect_human: false,
   };
 }
