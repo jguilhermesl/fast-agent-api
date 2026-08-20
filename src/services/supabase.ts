@@ -67,12 +67,53 @@ export function inferModelProvider(modelName: string): string {
 // Fonte do fator: openai.com/api/pricing (cached input a 10% do input).
 const CACHED_INPUT_FACTOR = 0.1;
 
+// Modelos sem entrada própria na tabela, avisados uma vez cada — repetir a cada
+// chamada afogaria o log.
+const modelosSemPreco = new Set<string>();
+
+/**
+ * Preço do modelo: match exato, senão o prefixo MAIS LONGO que casar.
+ *
+ * O comprimento importa. `Object.entries(...).find()` devolvia o primeiro prefixo
+ * na ordem de declaração, e "gpt-4.1" vem antes de "gpt-4.1-mini" — então
+ * `gpt-4.1-mini-2025-04-14` era cobrado a US$ 2,00/1M em vez de US$ 0,40/1M, 5×
+ * mais caro. O mesmo acontecia com gpt-4.1-nano e gpt-4o-mini.
+ */
+function ratesFor(model: string): { input: number; output: number } {
+  const exato = config.tokenCost[model];
+  if (exato) return exato;
+
+  const candidatos = Object.entries(config.tokenCost)
+    .filter(([key]) => model.startsWith(key))
+    .sort((a, b) => b[0].length - a[0].length);
+
+  if (!candidatos.length) {
+    if (!modelosSemPreco.has(model)) {
+      modelosSemPreco.add(model);
+      console.warn(`[Custo] modelo "${model}" não está em config.tokenCost — usando tarifa genérica.`);
+    }
+    return { input: 0.000001, output: 0.000003 };
+  }
+
+  const [key, rates] = candidatos[0];
+
+  // O prefixo casou, mas perdeu o tier: "gpt-5.4-mini-2026-03-17" casa "gpt-5.4"
+  // e passa a ser cobrado como o modelo grande. Não dá para adivinhar a tarifa do
+  // mini, então mantém o valor e grita — o custo relatado desse modelo fica
+  // inflado até alguém cadastrar o preço certo. Medido em 30 dias de
+  // `llm_usage_logs`: 99.491.846 tokens de input do executor contabilizados a
+  // US$ 2,50/1M, US$ 287,90 no período.
+  const tier = model.match(/-(mini|nano)\b/)?.[1];
+  if (tier && !key.includes(tier) && !modelosSemPreco.has(model)) {
+    modelosSemPreco.add(model);
+    console.warn(`[Custo] "${model}" está sendo cobrado com a tarifa de "${key}" — falta entrada "${key}-${tier}" em config.tokenCost. O custo relatado deste modelo está INFLADO.`);
+  }
+
+  return rates;
+}
+
 export function calcCostUsd(model: string, tokensIn: number, tokensOut: number, cachedIn = 0): number {
-  // Match exato primeiro, depois por prefixo (ex: "gpt-4.1-mini-2025-04-14" → "gpt-4.1-mini")
-  const rates =
-    config.tokenCost[model] ??
-    Object.entries(config.tokenCost).find(([key]) => model.startsWith(key))?.[1] ??
-    { input: 0.000001, output: 0.000003 };
+  const rates = ratesFor(model);
 
   const cached = Math.min(Math.max(cachedIn, 0), tokensIn);
   const fresh  = tokensIn - cached;
