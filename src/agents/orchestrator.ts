@@ -493,7 +493,9 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     });
 
     if (veredito.acao === 'reoferta') {
-      parsed = { mensagens: veredito.mensagens, redirect_human: false };
+      // Troca só o texto. `redirect_human`/`transfer_reason` são preservados:
+      // se o mesmo turno também pedia transferência, o guard não pode cancelá-la.
+      parsed = { ...parsed, mensagens: veredito.mensagens };
     }
     // 'reparado': o evento passou a existir, a confirmação original vale.
     // 'nada': caminho feliz — o evento já estava criado.
