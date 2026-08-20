@@ -42,6 +42,61 @@ export async function getIntentLogs(
   return (data ?? []).reverse();
 }
 
+/**
+ * A conversa já tem um compromisso criado com sucesso?
+ *
+ * Query própria, sem janela de tempo e sem `limit` que possa cortar: uma conversa
+ * da Duda medida em 14/08/2026 remetia a um agendamento feito 14 dias antes, e
+ * qualquer corte por recência faria o guard concluir que não existia evento e
+ * criar um segundo.
+ *
+ * Também não filtra `needs_context` — `realizar_agendamento` grava com `false` e
+ * ficaria invisível.
+ */
+export async function conversaTemCompromissoCriado(
+  agentId: string,
+  conversationId: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('intent_execution_logs')
+    .select('id')
+    .eq('agent_id', agentId)
+    .eq('conversation_id', conversationId)
+    .eq('success', true)
+    .or('intent_key.ilike.%criar_evento%,intent_key.ilike.%create_event%,intent_key.ilike.%realizar_agendament%,intent_key.ilike.%agendar_%')
+    .limit(1);
+
+  if (error) {
+    // Na dúvida, assume que existe: preferimos não agir a criar evento duplicado.
+    console.error('[Supabase] conversaTemCompromissoCriado error:', error.message);
+    return true;
+  }
+  return (data ?? []).length > 0;
+}
+
+/**
+ * Últimos logs da conversa — usados só para remontar os horários que a agenda
+ * ofereceu, quando o guard precisa reofertar.
+ */
+export async function getIntentLogsCompletos(
+  agentId: string,
+  conversationId: string
+): Promise<IntentLog[]> {
+  const { data, error } = await supabase
+    .from('intent_execution_logs')
+    .select('id, intent_key, arguments, response_data, success, created_at')
+    .eq('agent_id', agentId)
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+    .limit(25);
+
+  if (error) {
+    console.error('[Supabase] getIntentLogsCompletos error:', error.message);
+    return [];
+  }
+  return (data ?? []).reverse();
+}
+
 // ── Token tracking ────────────────────────────────────────────
 
 export async function saveTokenUsage(entry: TokenLogEntry): Promise<void> {

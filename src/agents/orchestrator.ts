@@ -2,8 +2,17 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
 import { getHistory, appendHistory } from '../memory/redis';
-import { saveTokenUsage, calcCostUsd, inferModelProvider, logError } from '../services/supabase';
+import {
+  saveTokenUsage,
+  calcCostUsd,
+  inferModelProvider,
+  logError,
+  getAgentIntents,
+  getIntentLogsCompletos,
+  conversaTemCompromissoCriado,
+} from '../services/supabase';
 import { runExecutor } from './executor';
+import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
 
@@ -459,7 +468,36 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
 
   console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} executorCalled=${result.executorTrace.called}`);
 
-  const parsed = parseOrchestratorOutput(result.output);
+  let parsed = parseOrchestratorOutput(result.output);
+
+  // Guard de agendamento: a resposta não pode afirmar que o horário está marcado
+  // sem que o evento exista. Só toca a rede quando o texto casa o padrão de
+  // confirmação — nos demais turnos o custo é uma regex.
+  if (afirmaAgendamento(parsed.mensagens)) {
+    const [intents, jaTemCompromisso, logsDaConversa] = await Promise.all([
+      getAgentIntents(req.agent_id),
+      conversaTemCompromissoCriado(req.agent_id, req.conversation_id),
+      getIntentLogsCompletos(req.agent_id, req.conversation_id),
+    ]);
+
+    const veredito = await garantirAgendamento({
+      agent_id: req.agent_id,
+      conversation_id: req.conversation_id,
+      lead_id: req.lead_id,
+      contact_phone: req.contact_phone,
+      intents,
+      jaTemCompromisso,
+      logsDaConversa,
+      toolsDoTurno: result.executorTrace.tools_called,
+      mensagens: parsed.mensagens,
+    });
+
+    if (veredito.acao === 'reoferta') {
+      parsed = { mensagens: veredito.mensagens, redirect_human: false };
+    }
+    // 'reparado': o evento passou a existir, a confirmação original vale.
+    // 'nada': caminho feliz — o evento já estava criado.
+  }
 
   // Atualiza histórico Redis — salva o texto limpo das mensagens, não o JSON bruto.
   // Isso evita que o modelo veja JSON estrutural no histórico em vez de linguagem natural.
