@@ -222,13 +222,14 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
   const tools = toOpenAITools(allTools);
   let totalInputTokens = 0;
+  let totalCachedTokens = 0;
   let totalOutputTokens = 0;
   let usedModel = 'gpt-4.1-mini';
   let rounds = 0;
   const toolsCalledLog: ToolCallLog[] = [];
 
   const buildTrace = (finalResult: string): ExecutorResult => {
-    const cost_usd = calcCostUsd(usedModel, totalInputTokens, totalOutputTokens);
+    const cost_usd = calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens);
     return {
       result: finalResult,
       trace: {
@@ -258,6 +259,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     const msg = response.choices[0].message;
     totalInputTokens  += response.usage?.prompt_tokens     ?? 0;
     totalOutputTokens += response.usage?.completion_tokens ?? 0;
+    totalCachedTokens += response.usage?.prompt_tokens_details?.cached_tokens ?? 0;
     usedModel = response.model;
 
     // Sem tool calls → resposta final
@@ -271,7 +273,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         input_tokens: totalInputTokens,
         output_tokens: totalOutputTokens,
         total_tokens: totalInputTokens + totalOutputTokens,
-        estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
+        estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens),
       });
       return buildTrace(msg.content ?? '(sem resposta)');
     }
@@ -327,7 +329,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     input_tokens: totalInputTokens,
     output_tokens: totalOutputTokens,
     total_tokens: totalInputTokens + totalOutputTokens,
-    estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
+    estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens),
   });
 
   await logError({
