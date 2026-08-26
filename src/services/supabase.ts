@@ -324,8 +324,14 @@ export async function updateLeadLastMessageAt(
 // ── Knowledge base (vector search) ───────────────────────────
 
 const KB_MATCH_COUNT   = 3;    // máximo de chunks retornados
-const KB_MIN_SIMILARITY = 1.30; // descarta resultados pouco relevantes (similarity > 1 = distância, não cosine)
-const KB_MAX_CHUNK_CHARS = 2000; // trunca chunks muito longos (aumentado de 600 para 2000)
+const KB_MIN_SIMILARITY = 1.30; // descarta resultados pouco relevantes (similarity = 1 + cosseno, faixa 0-2; exige cosseno >= 0.30)
+// Alinhado ao CHUNK_SIZE=6000 do generate-embedding (chat-flow-pilot-63): a
+// ingestão agora fatia o treinamento em pedaços de até 6000 chars, cada um
+// com embedding próprio. Cortar a leitura em 2000 mutilava um chunk inteiro
+// no meio da frase (medido na Duda: corte no meio do preparo de exame de
+// cultura). 6000 evita truncar um chunk bem formado; documento ainda maior
+// que isso já vira mais de um chunk na origem.
+const KB_MAX_CHUNK_CHARS = 6000;
 
 export async function searchKnowledgeBase(
   agentId: string,
