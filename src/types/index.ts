@@ -128,6 +128,15 @@ export interface TokenLogEntry {
   output_tokens: number;
   total_tokens: number;
   estimated_cost_usd: number;
+  /**
+   * Parte do input servida pelo cache de prefixo do provedor (custa ~10%).
+   *
+   * A coluna `cached_input_tokens` existe em `llm_usage_logs` desde sempre e estava
+   * zerada em 100% das linhas — não porque o cache estivesse desligado, mas porque
+   * ninguém lia `usage.prompt_tokens_details.cached_tokens` da resposta. Sem este
+   * campo não há como saber se o cache pega, e o custo exibido é um teto, não a fatura.
+   */
+  cached_input_tokens?: number;
 }
 
 // ── Tool calling (genérico) ───────────────────────────────────

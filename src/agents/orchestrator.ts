@@ -16,8 +16,21 @@ import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
 
-const openai    = new OpenAI({ apiKey: config.openaiApiKey });
-const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
+/**
+ * Teto de tempo por chamada de LLM.
+ *
+ * Não havia nenhum: o único limite era de RODADAS (5 aqui, 8 no executor), nunca de
+ * relógio. Com o executor podendo segurar até 120 s por tool, o pior caso não tinha
+ * teto — e do outro lado da fila há um cliente no WhatsApp esperando. 60 s é folgado
+ * para uma resposta que hoje leva ~15 s (p95 medido em 27/08/2026), e corta a cauda.
+ *
+ * O SDK repete a chamada por conta própria; `maxRetries: 1` evita que o teto real
+ * vire 60 s × 3.
+ */
+const LLM_TIMEOUT_MS = 60_000;
+
+const openai    = new OpenAI({ apiKey: config.openaiApiKey, timeout: LLM_TIMEOUT_MS, maxRetries: 1 });
+const anthropic = new Anthropic({ apiKey: config.anthropicApiKey, timeout: LLM_TIMEOUT_MS, maxRetries: 1 });
 
 const MAX_TOOL_ROUNDS = 5;
 
@@ -223,6 +236,8 @@ interface ProviderResult {
   output: string;
   tokensIn: number;
   tokensOut: number;
+  /** Fatia de `tokensIn` servida pelo cache de prefixo. Ver TokenLogEntry. */
+  tokensCached: number;
   model: string;
   rounds: number;
   executorTrace: ExecutorTrace;
@@ -247,7 +262,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
     { role: 'user', content: formattedMessage },
   ];
 
-  let totalIn = 0, totalOut = 0, rounds = 0;
+  let totalIn = 0, totalOut = 0, totalCached = 0, rounds = 0;
   const allExecutorTraces: ExecutorTrace[] = [];
   const communications: Array<{ query: string; result: string }> = [];
 
@@ -267,12 +282,15 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
     const msg = response.choices[0].message;
     totalIn  += response.usage?.prompt_tokens     ?? 0;
     totalOut += response.usage?.completion_tokens ?? 0;
+    // `cached_tokens` é subconjunto de `prompt_tokens`, não uma parcela extra.
+    totalCached += response.usage?.prompt_tokens_details?.cached_tokens ?? 0;
 
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
       return {
         output: msg.content ?? '',
         tokensIn: totalIn,
         tokensOut: totalOut,
+        tokensCached: totalCached,
         model: response.model,
         rounds,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
@@ -323,7 +341,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
     { role: 'user', content: formattedMessage },
   ];
 
-  let totalIn = 0, totalOut = 0, rounds = 0;
+  let totalIn = 0, totalOut = 0, totalCached = 0, rounds = 0;
   const usedModel = req.model_name;
   const allExecutorTraces: ExecutorTrace[] = [];
   const communications: Array<{ query: string; result: string }> = [];
@@ -344,6 +362,17 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
 
     totalIn  += response.usage.input_tokens;
     totalOut += response.usage.output_tokens;
+    // Na Anthropic o input cacheado vem FORA de `input_tokens` (ao contrário da
+    // OpenAI), então soma nos dois: no total de input e no contador de cache.
+    //
+    // O cast é necessário porque o SDK fixado (^0.27.0, de 2024) não declara o campo
+    // no tipo `Usage` — ele veio depois. Na prática este valor deve ser 0 hoje: o
+    // cache da Anthropic exige `cache_control` nos blocos, que este código não envia.
+    // Fica lendo mesmo assim para não precisar mexer aqui quando/se isso mudar.
+    const anthropicCached =
+      (response.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0;
+    totalIn     += anthropicCached;
+    totalCached += anthropicCached;
 
     if (response.stop_reason !== 'tool_use') {
       const textBlock = response.content.find((b) => b.type === 'text');
@@ -352,6 +381,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
         output,
         tokensIn: totalIn,
         tokensOut: totalOut,
+        tokensCached: totalCached,
         model: usedModel,
         rounds,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
@@ -464,9 +494,11 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     output_tokens: result.tokensOut,
     total_tokens: result.tokensIn + result.tokensOut,
     estimated_cost_usd: costUsd,
+    cached_input_tokens: result.tokensCached,
   });
 
-  console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} executorCalled=${result.executorTrace.called}`);
+  const pctCache = result.tokensIn > 0 ? Math.round((result.tokensCached / result.tokensIn) * 100) : 0;
+  console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} cached=${result.tokensCached} (${pctCache}%) executorCalled=${result.executorTrace.called}`);
 
   let parsed = parseOrchestratorOutput(result.output);
 
