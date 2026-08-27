@@ -15,7 +15,9 @@ import {
 } from '../tools/definitions';
 import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 
-const openai = new OpenAI({ apiKey: config.openaiApiKey });
+// Mesmo teto de relógio do orquestrador (ver LLM_TIMEOUT_MS lá): antes o único
+// limite era de rodadas, e 8 rodadas sem timeout não têm teto de tempo nenhum.
+const openai = new OpenAI({ apiKey: config.openaiApiKey, timeout: 60_000, maxRetries: 1 });
 
 const MAX_TOOL_ROUNDS = 8;
 
@@ -223,6 +225,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   const tools = toOpenAITools(allTools);
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let totalCachedTokens = 0;
   let usedModel = 'gpt-4.1-mini';
   let rounds = 0;
   const toolsCalledLog: ToolCallLog[] = [];
@@ -256,6 +259,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     });
 
     const msg = response.choices[0].message;
+    totalCachedTokens += response.usage?.prompt_tokens_details?.cached_tokens ?? 0;
     totalInputTokens  += response.usage?.prompt_tokens     ?? 0;
     totalOutputTokens += response.usage?.completion_tokens ?? 0;
     usedModel = response.model;
@@ -272,6 +276,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         output_tokens: totalOutputTokens,
         total_tokens: totalInputTokens + totalOutputTokens,
         estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
+        cached_input_tokens: totalCachedTokens,
       });
       return buildTrace(msg.content ?? '(sem resposta)');
     }
@@ -328,6 +333,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     output_tokens: totalOutputTokens,
     total_tokens: totalInputTokens + totalOutputTokens,
     estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
+    cached_input_tokens: totalCachedTokens,
   });
 
   await logError({

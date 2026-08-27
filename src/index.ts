@@ -7,6 +7,7 @@ import { stagesRouter } from './routes/stages';
 import { sendExternalRouter } from './routes/sendExternal';
 import { addContextRouter } from './routes/addContext';
 import { typingRouter } from './routes/typing';
+import { versionRouter } from './routes/version';
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use('/api/stages', stagesRouter);
 app.use('/api/send-external', sendExternalRouter);
 app.use('/api/add-context', addContextRouter);
 app.use('/api/typing', typingRouter);
+app.use('/api/version', versionRouter);
 
 // Root health
 app.get('/', (_req, res) => res.json({ service: 'fast-agent-api', status: 'ok' }));

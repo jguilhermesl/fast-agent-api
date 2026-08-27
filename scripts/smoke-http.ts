@@ -28,6 +28,7 @@ const express = require('express') as typeof import('express');
 const { chatRouter } = require('../src/routes/chat') as typeof import('../src/routes/chat');
 const { stagesRouter } = require('../src/routes/stages') as typeof import('../src/routes/stages');
 const { typingRouter } = require('../src/routes/typing') as typeof import('../src/routes/typing');
+const { versionRouter } = require('../src/routes/version') as typeof import('../src/routes/version');
 
 const SECRET = process.env.API_SECRET;
 
@@ -49,6 +50,7 @@ app.use(express.json({ limit: '5mb' }));
 app.use('/api/chat', chatRouter);
 app.use('/api/stages', stagesRouter);
 app.use('/api/typing', typingRouter);
+app.use('/api/version', versionRouter);
 app.get('/', (_req: unknown, res: { json: (b: unknown) => void }) => res.json({ service: 'fast-agent-api', status: 'ok' }));
 
 const server = app.listen(0, async () => {
@@ -141,6 +143,17 @@ const server = app.listen(0, async () => {
 
     const inexistente = await req('/rota/que/nao/existe');
     check('rota inexistente → 404', inexistente.status, 404);
+
+    console.log('\n[6] /api/version diz qual commit está no ar');
+    const versao = await req('/api/version');
+    const vCorpo = versao.corpo as Record<string, unknown>;
+    check('GET /api/version → 200', versao.status, 200);
+    check('responde sem exigir token', typeof vCorpo?.commit === 'string', true);
+    check('identifica o serviço', vCorpo?.service, 'fast-agent-api');
+    // Sem a variável do Railway o valor é "desconhecido" — nunca undefined, senão
+    // quem confere o deploy não distingue "não sei" de "campo quebrado".
+    check('commit tem valor mesmo fora do Railway', vCorpo?.commit, 'desconhecido');
+    check('não vaza credencial', /sk-|eyJ|service-falsa|smoke-secret/.test(JSON.stringify(vCorpo)), false);
   } catch (err) {
     falhou++;
     console.log(`  FALHA exceção no smoke: ${err instanceof Error ? err.message : String(err)}`);
