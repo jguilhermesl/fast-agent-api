@@ -2,6 +2,8 @@
 // Types — Fast Agent API
 // ============================================================
 
+import type { Deadline } from '../services/deadline';
+
 export type ModelProvider = 'openai' | 'anthropic' | 'gemini';
 
 // Payload que chega do n8n via POST /api/chat
@@ -82,6 +84,8 @@ export interface ExecutorInput {
   scoped_client_id: string;
   client_messages: string;
   conversation_context?: string;    // últimas mensagens do histórico (para dar contexto ao Executor)
+  /** Orçamento de tempo do turno inteiro (ver services/deadline.ts). Ausente = sem teto agregado. */
+  deadline?: Deadline;
 }
 
 // Intent configurada no Supabase (agent_intents)

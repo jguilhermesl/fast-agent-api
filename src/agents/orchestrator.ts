@@ -13,6 +13,7 @@ import {
 import { runExecutor } from './executor';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
+import { createDeadline, capTimeout, DeadlineExceededError, type Deadline } from '../services/deadline';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
 
 /**
@@ -25,6 +26,12 @@ import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLo
  *
  * O SDK repete a chamada por conta própria; `maxRetries: 1` evita que o teto real
  * vire 60 s × 3.
+ *
+ * O que ISTO não resolve: é teto por CHAMADA, não do turno inteiro. Orquestrador
+ * (MAX_TOOL_ROUNDS=5) chamando Executor (MAX_TOOL_ROUNDS=8) chamando tool HTTP
+ * (até 120s em tools/handlers.ts) ainda podia somar dezenas de minutos no pior
+ * caso. Isso é resolvido por `createDeadline`/`capTimeout` (services/deadline.ts),
+ * usado logo abaixo em `runOrchestrator`.
  */
 const LLM_TIMEOUT_MS = 60_000;
 
@@ -244,7 +251,7 @@ interface ProviderResult {
 }
 
 // ── OpenAI Orchestrator ───────────────────────────────────────
-async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<ProviderResult> {
+async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Deadline): Promise<ProviderResult> {
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
@@ -266,6 +273,9 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
   const communications: Array<{ query: string; result: string }> = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Orçamento agregado do turno (services/deadline.ts) — checado antes de
+    // gastar mais uma rodada, que pode disparar um Executor de até 8 rodadas.
+    if (deadline.expired()) throw new DeadlineExceededError(`orquestrador OpenAI round ${round + 1}`);
     rounds = round + 1;
     // Round 0: força o executor (exceto em saudações/despedidas)
     // Rounds seguintes: auto — o modelo decide se precisa de mais informações
@@ -276,7 +286,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
       tools,
       tool_choice: toolChoice,
       temperature: 0.2,
-    });
+    }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
 
     const msg = response.choices[0].message;
     totalIn  += response.usage?.prompt_tokens     ?? 0;
@@ -311,6 +321,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
         scoped_client_id: req.scoped_client_id,
         client_messages: req.client_messages,
         conversation_context: conversationContext,
+        deadline,
       });
       allExecutorTraces.push(executorResult.trace);
       communications.push({ query, result: executorResult.result });
@@ -323,7 +334,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[]): Promise<Prov
 
 // ── Anthropic Orchestrator ────────────────────────────────────
 
-async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<ProviderResult> {
+async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: Deadline): Promise<ProviderResult> {
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
@@ -346,6 +357,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
   const communications: Array<{ query: string; result: string }> = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    if (deadline.expired()) throw new DeadlineExceededError(`orquestrador Anthropic round ${round + 1}`);
     rounds = round + 1;
     // Round 0: força o executor (exceto em saudações/despedidas)
     const toolChoice: Anthropic.MessageCreateParams['tool_choice'] =
@@ -357,7 +369,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
       messages,
       tools: tools as Anthropic.Tool[],
       tool_choice: toolChoice,
-    });
+    }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
 
     totalIn  += response.usage.input_tokens;
     totalOut += response.usage.output_tokens;
@@ -404,6 +416,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[]): Promise<P
         scoped_client_id: req.scoped_client_id,
         client_messages: req.client_messages,
         conversation_context: conversationContext,
+        deadline,
       });
       allExecutorTraces.push(executorResult.trace);
       communications.push({ query, result: executorResult.result });
@@ -436,13 +449,18 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   const scopedClientId = `${req.agent_id}:${req.contact_phone}`;
   const history = await getHistory(scopedClientId, 18);
 
+  // Orçamento único do turno, criado aqui — na entrada do request — e
+  // propagado pro Executor e pelas tools (services/deadline.ts). Sem isto, só
+  // existia teto de RODADAS em cada nível, nunca teto de RELÓGIO agregado.
+  const deadline = createDeadline();
+
   let result: ProviderResult | null = null;
   let providerUsed = req.model_provider;
 
   try {
     switch (req.model_provider) {
-      case 'openai':    result = await runOpenAI(req, history);    break;
-      case 'anthropic': result = await runAnthropic(req, history); break;
+      case 'openai':    result = await runOpenAI(req, history, deadline);    break;
+      case 'anthropic': result = await runAnthropic(req, history, deadline); break;
       /**
        * Provedor fora dos dois implementados.
        *
@@ -467,11 +485,26 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     const errMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
     console.error(`[Orchestrator] Provider ${req.model_provider} failed:`, errMsg);
 
+    // Orçamento do turno já esgotado: tentar o fallback OpenAI gastaria MAIS
+    // tempo do que já não sobra — o oposto do que o orçamento existe pra
+    // garantir. Vai direto pro fallback de segurança, sem nova chamada de rede.
+    if (primaryErr instanceof DeadlineExceededError) {
+      await logError({
+        conversation_id: req.conversation_id,
+        agent_id: req.agent_id,
+        lead_id: req.lead_id,
+        error_message: errMsg,
+        provider_failed: req.model_provider,
+        layer: 'orchestrator-deadline',
+      });
+      return makeFallback(history);
+    }
+
     if (req.model_provider !== 'openai') {
       try {
         console.log('[Orchestrator] Trying OpenAI fallback...');
         providerUsed = 'openai';
-        result = await runOpenAI({ ...req, model_name: 'gpt-4.1-mini' }, history);
+        result = await runOpenAI({ ...req, model_name: 'gpt-4.1-mini' }, history, deadline);
       } catch (fallbackErr) {
         const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         await logError({

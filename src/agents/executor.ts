@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { config } from '../config';
 import { getAgentIntents, getIntentLogs, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
+import { capTimeout } from '../services/deadline';
 import {
   handleExecutarIntent,
   handleAtualizarLeadCRM,
@@ -257,7 +258,17 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     };
   };
 
+  let esgotouPorPrazo = false;
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Orçamento agregado do turno (ver services/deadline.ts) — checado ANTES de
+    // gastar mais uma rodada. Sem isto, MAX_TOOL_ROUNDS=8 só limita QUANTIDADE
+    // de chamadas, nunca o relógio; o orquestrador pode ter herdado quase nada
+    // de orçamento e o executor continuaria as 8 rodadas do mesmo jeito.
+    if (input.deadline?.expired()) {
+      esgotouPorPrazo = true;
+      break;
+    }
     rounds = round + 1;
     const response = await openai.chat.completions.create({
       model: 'gpt-5.4-mini',
@@ -265,7 +276,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
       tools,
       tool_choice: 'auto',
       temperature: 0.3,
-    });
+    }, { timeout: capTimeout(60_000, input.deadline) });
 
     const msg = response.choices[0].message;
     totalCachedTokens += response.usage?.prompt_tokens_details?.cached_tokens ?? 0;
@@ -329,8 +340,10 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     }
   }
 
-  // Chegou no limite de rounds — salva tokens e retorna o que tem
-  // buildTokenLogEntry (services/pricing.ts) grava pricing_version: 2 — SPEC-01.
+  // Chegou no limite de rounds OU estourou o orçamento de tempo — salva tokens
+  // e retorna o que tem. Mesmo bloco pros dois casos; o que muda é a mensagem,
+  // pra quem olha `agent_error_logs` não confundir "muitas rodadas" com
+  // "sem tempo" — são causas e consertos diferentes.
   await saveTokenUsage(buildTokenLogEntry({
     agent_id: input.agent_id,
     conversation_id: input.conversation_id,
@@ -345,10 +358,14 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     conversation_id: input.conversation_id,
     agent_id: input.agent_id,
     lead_id: input.lead_id,
-    error_message: `Executor atingiu limite de ${MAX_TOOL_ROUNDS} rounds`,
+    error_message: esgotouPorPrazo
+      ? `Executor abortado por orçamento de tempo do turno esgotado (round ${rounds})`
+      : `Executor atingiu limite de ${MAX_TOOL_ROUNDS} rounds`,
     provider_failed: 'openai',
-    layer: 'executor',
+    layer: esgotouPorPrazo ? 'executor-deadline' : 'executor',
   });
 
-  return buildTrace('(executor atingiu limite de execução)');
+  return buildTrace(
+    esgotouPorPrazo ? '(orçamento de tempo do turno esgotado)' : '(executor atingiu limite de execução)'
+  );
 }
