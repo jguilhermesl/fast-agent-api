@@ -483,7 +483,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   if (!result) return makeFallback(history);
 
   // Salva tokens
-  const costUsd = calcCostUsd(result.model, result.tokensIn, result.tokensOut);
+  const costUsd = calcCostUsd(result.model, result.tokensIn, result.tokensOut, result.tokensCached);
   await saveTokenUsage({
     agent_id: req.agent_id,
     conversation_id: req.conversation_id,

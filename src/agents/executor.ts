@@ -231,7 +231,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   const toolsCalledLog: ToolCallLog[] = [];
 
   const buildTrace = (finalResult: string): ExecutorResult => {
-    const cost_usd = calcCostUsd(usedModel, totalInputTokens, totalOutputTokens);
+    const cost_usd = calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens);
     return {
       result: finalResult,
       trace: {
@@ -275,7 +275,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         input_tokens: totalInputTokens,
         output_tokens: totalOutputTokens,
         total_tokens: totalInputTokens + totalOutputTokens,
-        estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
+        estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens),
         cached_input_tokens: totalCachedTokens,
       });
       return buildTrace(msg.content ?? '(sem resposta)');
@@ -332,7 +332,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     input_tokens: totalInputTokens,
     output_tokens: totalOutputTokens,
     total_tokens: totalInputTokens + totalOutputTokens,
-    estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens),
+    estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens),
     cached_input_tokens: totalCachedTokens,
   });
 
