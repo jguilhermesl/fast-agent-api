@@ -1,0 +1,9 @@
+{
+  "//": "O tsconfig.json exclui *.test.ts porque senão o teste ia para dist/ e subia no Railway. Mas `tsc --noEmit` é o portão antes de publicar, e o vitest NÃO faz typecheck — sem este arquivo o teste podia referenciar export inexistente e só quebrar em runtime. `npm run typecheck` roda os dois.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

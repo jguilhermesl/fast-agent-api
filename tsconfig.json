@@ -14,5 +14,6 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "//": "Teste fora do build: sem isto o .test.ts vai para dist/ e sobe no Railway.",
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
 }
