@@ -2,6 +2,7 @@ import axios from 'axios';
 import OpenAI from 'openai';
 import { config } from '../config';
 import { searchKnowledgeBase } from '../services/supabase';
+import { capTimeout } from '../services/deadline';
 import type { ExecutorInput } from '../types';
 
 const openai = new OpenAI({ apiKey: config.openaiApiKey });
@@ -10,8 +11,15 @@ const openai = new OpenAI({ apiKey: config.openaiApiKey });
 
 export async function handleExecutarIntent(
   args: { intent_key: string; arguments: Record<string, unknown> },
-  ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id'>
+  ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id' | 'deadline'>
 ): Promise<string> {
+  // Orçamento do turno (services/deadline.ts) já estourou: aborta ANTES da
+  // chamada de rede. Este é o handler com o maior teto (120s) — o que mais
+  // sozinho consegue esgotar o orçamento inteiro do request.
+  if (ctx.deadline?.expired()) {
+    console.warn(`[Tool] executar_intent "${args.intent_key}" abortado — orçamento do turno esgotado`);
+    return JSON.stringify({ success: false, error: 'orçamento de tempo do turno esgotado' });
+  }
   try {
     const body = {
       intent_key: args.intent_key,
@@ -28,7 +36,7 @@ export async function handleExecutarIntent(
           Authorization: `Bearer ${config.supabaseServiceKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 120_000,
+        timeout: capTimeout(120_000, ctx.deadline),
       }
     );
     return JSON.stringify(response.data);
@@ -43,8 +51,12 @@ export async function handleExecutarIntent(
 
 export async function handleAtualizarLeadCRM(
   args: { stage: string },
-  ctx: Pick<ExecutorInput, 'agent_id' | 'lead_id'>
+  ctx: Pick<ExecutorInput, 'agent_id' | 'lead_id' | 'deadline'>
 ): Promise<string> {
+  if (ctx.deadline?.expired()) {
+    console.warn('[Tool] atualizar_lead_crm abortado — orçamento do turno esgotado');
+    return JSON.stringify({ success: false, error: 'orçamento de tempo do turno esgotado' });
+  }
   try {
     const response = await axios.post(
       `${config.supabaseUrl}/functions/v1/n8n-webhook`,
@@ -61,7 +73,7 @@ export async function handleAtualizarLeadCRM(
           'x-webhook-secret': config.webhookSecret,
           'Content-Type': 'application/json',
         },
-        timeout: 10_000,
+        timeout: capTimeout(10_000, ctx.deadline),
       }
     );
     return JSON.stringify(response.data ?? { success: true });
@@ -76,8 +88,12 @@ export async function handleAtualizarLeadCRM(
 
 export async function handleEnviarArquivo(
   args: { file_url: string },
-  ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id' | 'contact_phone'>
+  ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id' | 'contact_phone' | 'deadline'>
 ): Promise<string> {
+  if (ctx.deadline?.expired()) {
+    console.warn('[Tool] enviar_arquivo abortado — orçamento do turno esgotado');
+    return JSON.stringify({ success: false, error: 'orçamento de tempo do turno esgotado' });
+  }
   try {
     const response = await axios.post(
       `${config.supabaseUrl}/functions/v1/send-media`,
@@ -91,7 +107,7 @@ export async function handleEnviarArquivo(
           Authorization: `Bearer ${config.supabaseServiceKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 15_000,
+        timeout: capTimeout(15_000, ctx.deadline),
       }
     );
     return JSON.stringify(response.data ?? { success: true });
@@ -106,14 +122,18 @@ export async function handleEnviarArquivo(
 
 export async function handleKnowledgeBase(
   args: { query: string },
-  ctx: Pick<ExecutorInput, 'agent_id'>
+  ctx: Pick<ExecutorInput, 'agent_id' | 'deadline'>
 ): Promise<string> {
+  if (ctx.deadline?.expired()) {
+    console.warn('[Tool] agent_knowledge_base abortado — orçamento do turno esgotado');
+    return '(orçamento de tempo do turno esgotado)';
+  }
   try {
     // Gera embedding da query
-    const embeddingResponse = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: args.query,
-    });
+    const embeddingResponse = await openai.embeddings.create(
+      { model: 'text-embedding-3-small', input: args.query },
+      { timeout: capTimeout(30_000, ctx.deadline) }
+    );
     const embedding = embeddingResponse.data[0].embedding;
 
     // Busca no Supabase Vector Store

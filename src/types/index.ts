@@ -2,6 +2,8 @@
 // Types — Fast Agent API
 // ============================================================
 
+import type { Deadline } from '../services/deadline';
+
 export type ModelProvider = 'openai' | 'anthropic' | 'gemini';
 
 // Payload que chega do n8n via POST /api/chat
@@ -82,6 +84,8 @@ export interface ExecutorInput {
   scoped_client_id: string;
   client_messages: string;
   conversation_context?: string;    // últimas mensagens do histórico (para dar contexto ao Executor)
+  /** Orçamento de tempo do turno inteiro (ver services/deadline.ts). Ausente = sem teto agregado. */
+  deadline?: Deadline;
 }
 
 // Intent configurada no Supabase (agent_intents)
@@ -137,6 +141,16 @@ export interface TokenLogEntry {
    * campo não há como saber se o cache pega, e o custo exibido é um teto, não a fatura.
    */
   cached_input_tokens?: number;
+  /**
+   * Marca de qual lado do corte de tarifa da SPEC-01 esta linha nasceu — ver
+   * migration `20260822143000_pricing_version.sql` em chat-flow-pilot-63.
+   * A coluna tem DEFAULT 1 ("custo NÃO confiável") só pra carimbar linhas
+   * antigas; quem grava tem que mandar 2 EXPLICITAMENTE. Campo obrigatório
+   * aqui (não opcional) de propósito: se um call-site esquecer, `tsc` reprova
+   * antes do deploy, em vez da linha nascer com o DEFAULT errado em silêncio.
+   * Use `CURRENT_PRICING_VERSION` de `services/pricing.ts` — nunca o literal.
+   */
+  pricing_version: number;
 }
 
 // ── Tool calling (genérico) ───────────────────────────────────
