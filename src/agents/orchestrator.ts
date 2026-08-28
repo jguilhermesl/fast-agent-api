@@ -444,7 +444,25 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     switch (req.model_provider) {
       case 'openai':    result = await runOpenAI(req, history);    break;
       case 'anthropic': result = await runAnthropic(req, history); break;
-      default:          result = await runOpenAI(req, history);
+      /**
+       * Provedor fora dos dois implementados.
+       *
+       * O `default` chamava `runOpenAI(req)` direto — mantendo `req.model_name`. Com
+       * `model_provider: 'gemini'` isso mandava `gemini-2.5-pro` para o cliente da
+       * OpenAI, que devolve 400; o catch abaixo via "provider !== openai", caía no
+       * fallback e o agente passava a rodar `gpt-4.1-mini` PARA SEMPRE, sem nenhum
+       * sinal na tela. O painel dizia "Gemini 2.5 Pro · Mais capaz".
+       *
+       * `throw` aqui não piora a experiência do cliente: o mesmo catch já trata, o
+       * fallback continua respondendo. A diferença é que agora o motivo chega em
+       * `agent_error_logs` com o nome do provedor, em vez de se disfarçar de erro
+       * transitório da OpenAI.
+       */
+      default:
+        throw new Error(
+          `model_provider "${req.model_provider}" não implementado (só openai e anthropic). ` +
+          `Agente ${req.agent_id} está configurado num provedor que este serviço não roda.`,
+        );
     }
   } catch (primaryErr) {
     const errMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
