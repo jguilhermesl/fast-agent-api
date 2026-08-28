@@ -1,3 +1,5 @@
+import type { TokenLogEntry } from '../types';
+
 /**
  * Tarifa dos modelos e cálculo de custo.
  *
@@ -121,4 +123,59 @@ export function calcCostUsd(
     (cheios * tarifa.input + cacheados * precoCache + tokensOut * tarifa.output) / 1_000_000;
 
   return parseFloat(usd.toFixed(8));
+}
+
+/**
+ * SPEC-01 · marca de qual lado do corte de tarifa uma linha de `llm_usage_logs`
+ * nasceu (migration `20260822143000_pricing_version.sql`, chat-flow-pilot-63):
+ *
+ *   1 = gravada ANTES da correção de tarifa — todo modelo "-mini" inflado,
+ *       `estimated_cost_usd` NÃO confiável. É o DEFAULT da coluna, e existe só
+ *       pra carimbar o passado.
+ *   2 = gravada DEPOIS — resolução por prefixo mais longo (`tarifaDe` acima) +
+ *       desconto de token cacheado. É o que este serviço grava HOJE.
+ *
+ * O DEFAULT da coluna continua 1 de propósito (não reescreve histórico). Cabe a
+ * quem grava mandar 2 explicitamente — daí esta constante existir, em vez de
+ * cada call-site escrever o literal.
+ */
+export const CURRENT_PRICING_VERSION = 2;
+
+export interface TokenLogParams {
+  agent_id: string;
+  conversation_id: string;
+  lead_id: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  /** Fatia de `tokensIn` servida pelo cache de prefixo. Ausente = 0 (sem cache). */
+  tokensCached?: number;
+}
+
+/**
+ * Monta a linha pronta para `saveTokenUsage`, com `pricing_version` incluído.
+ *
+ * Existe porque 3 call-sites (orchestrator.ts, executor.ts×2) montavam esse
+ * objeto à mão, cada um repetindo `model_provider`, `total_tokens` e
+ * `estimated_cost_usd` na unha — e nenhum deles setava `pricing_version`
+ * (o campo nem existia em `TokenLogEntry`), então toda linha nova caía no
+ * DEFAULT 1 ("custo não confiável"), o inverso da verdade desde a correção de
+ * tarifa. Centralizar aqui deixa só ESTE lugar podendo esquecer o campo — e
+ * ele é coberto por teste (pricing.test.ts).
+ */
+export function buildTokenLogEntry(params: TokenLogParams): TokenLogEntry {
+  const tokensCached = params.tokensCached ?? 0;
+  return {
+    agent_id: params.agent_id,
+    conversation_id: params.conversation_id,
+    lead_id: params.lead_id,
+    model_provider: inferModelProvider(params.model),
+    model_name: params.model,
+    input_tokens: params.tokensIn,
+    output_tokens: params.tokensOut,
+    total_tokens: params.tokensIn + params.tokensOut,
+    estimated_cost_usd: calcCostUsd(params.model, params.tokensIn, params.tokensOut, tokensCached),
+    cached_input_tokens: tokensCached,
+    pricing_version: CURRENT_PRICING_VERSION,
+  };
 }

@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../config';
-import { getAgentIntents, getIntentLogs, saveTokenUsage, calcCostUsd, inferModelProvider, logError } from '../services/supabase';
+import { getAgentIntents, getIntentLogs, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
 import {
   handleExecutarIntent,
   handleAtualizarLeadCRM,
@@ -266,18 +266,16 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
     // Sem tool calls → resposta final
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      await saveTokenUsage({
+      // buildTokenLogEntry (services/pricing.ts) grava pricing_version: 2 — SPEC-01.
+      await saveTokenUsage(buildTokenLogEntry({
         agent_id: input.agent_id,
         conversation_id: input.conversation_id,
         lead_id: input.lead_id,
-        model_provider: inferModelProvider(usedModel),
-        model_name: usedModel,
-        input_tokens: totalInputTokens,
-        output_tokens: totalOutputTokens,
-        total_tokens: totalInputTokens + totalOutputTokens,
-        estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens),
-        cached_input_tokens: totalCachedTokens,
-      });
+        model: usedModel,
+        tokensIn: totalInputTokens,
+        tokensOut: totalOutputTokens,
+        tokensCached: totalCachedTokens,
+      }));
       return buildTrace(msg.content ?? '(sem resposta)');
     }
 
@@ -323,18 +321,16 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   }
 
   // Chegou no limite de rounds — salva tokens e retorna o que tem
-  await saveTokenUsage({
+  // buildTokenLogEntry (services/pricing.ts) grava pricing_version: 2 — SPEC-01.
+  await saveTokenUsage(buildTokenLogEntry({
     agent_id: input.agent_id,
     conversation_id: input.conversation_id,
     lead_id: input.lead_id,
-    model_provider: inferModelProvider(usedModel),
-    model_name: usedModel,
-    input_tokens: totalInputTokens,
-    output_tokens: totalOutputTokens,
-    total_tokens: totalInputTokens + totalOutputTokens,
-    estimated_cost_usd: calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens),
-    cached_input_tokens: totalCachedTokens,
-  });
+    model: usedModel,
+    tokensIn: totalInputTokens,
+    tokensOut: totalOutputTokens,
+    tokensCached: totalCachedTokens,
+  }));
 
   await logError({
     conversation_id: input.conversation_id,

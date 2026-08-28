@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calcCostUsd, inferModelProvider, tarifaDe } from './pricing';
+import { calcCostUsd, inferModelProvider, tarifaDe, buildTokenLogEntry, CURRENT_PRICING_VERSION } from './pricing';
 
 /**
  * Fonte de verdade dos números esperados: a tabela `llm_pricing` do Supabase
@@ -91,6 +91,62 @@ describe('calcCostUsd — desconto de tokens cacheados', () => {
     // some em silêncio e o teste anterior continuaria verde.
     expect(tarifaDe('claude-sonnet-4-20250514').cached).toBeDefined();
     expect(tarifaDe('gpt-5.4-mini-2026-03-17').cached).toBeDefined();
+  });
+});
+
+describe('buildTokenLogEntry — pricing_version (SPEC-01)', () => {
+  // Migration 20260822143000_pricing_version.sql: a coluna nasce com DEFAULT 1
+  // ("custo NÃO confiável") só pra carimbar o passado. O gravador tem que
+  // mandar 2 EXPLICITAMENTE — antes da SPEC-01 não havia sequer o campo em
+  // TokenLogEntry, e os 3 call-sites (orchestrator.ts, executor.ts×2) que
+  // montavam esse objeto à mão nunca setavam a coluna, então toda linha nova
+  // caía no DEFAULT errado. Centralizar a montagem aqui garante um único
+  // lugar pra esse bug voltar — e ele tem teste.
+
+  it('toda entrada nasce com a versão corrente de tarifa, não o DEFAULT da coluna', () => {
+    const entry = buildTokenLogEntry({
+      agent_id: 'agent-1',
+      conversation_id: 'conv-1',
+      lead_id: 'lead-1',
+      model: 'gpt-5.4-mini-2026-03-17',
+      tokensIn: 1_000,
+      tokensOut: 200,
+    });
+    expect(entry.pricing_version).toBe(2);
+    expect(entry.pricing_version).toBe(CURRENT_PRICING_VERSION);
+    expect(entry.pricing_version).not.toBe(1); // 1 = DEFAULT da coluna = "não confiável"
+  });
+
+  it('CURRENT_PRICING_VERSION é 2 — resolução por prefixo mais longo + desconto de cache', () => {
+    expect(CURRENT_PRICING_VERSION).toBe(2);
+  });
+
+  it('preenche provider, totais e custo consistentes com calcCostUsd/inferModelProvider', () => {
+    const entry = buildTokenLogEntry({
+      agent_id: 'agent-1',
+      conversation_id: 'conv-1',
+      lead_id: 'lead-1',
+      model: 'claude-sonnet-4-20250514',
+      tokensIn: 1_000,
+      tokensOut: 500,
+      tokensCached: 200,
+    });
+    expect(entry.model_provider).toBe('anthropic');
+    expect(entry.model_name).toBe('claude-sonnet-4-20250514');
+    expect(entry.total_tokens).toBe(1_500);
+    expect(entry.cached_input_tokens).toBe(200);
+    expect(entry.estimated_cost_usd).toBeCloseTo(
+      calcCostUsd('claude-sonnet-4-20250514', 1_000, 500, 200),
+      8
+    );
+  });
+
+  it('tokensCached ausente vira 0, não undefined — cached_input_tokens nunca fica NULL à toa', () => {
+    const entry = buildTokenLogEntry({
+      agent_id: 'a', conversation_id: 'c', lead_id: 'l',
+      model: 'gpt-4.1-mini', tokensIn: 100, tokensOut: 50,
+    });
+    expect(entry.cached_input_tokens).toBe(0);
   });
 });
 

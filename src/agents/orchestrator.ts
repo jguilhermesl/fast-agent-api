@@ -4,8 +4,7 @@ import { config } from '../config';
 import { getHistory, appendHistory } from '../memory/redis';
 import {
   saveTokenUsage,
-  calcCostUsd,
-  inferModelProvider,
+  buildTokenLogEntry,
   logError,
   getAgentIntents,
   getIntentLogsCompletos,
@@ -500,20 +499,20 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
 
   if (!result) return makeFallback(history);
 
-  // Salva tokens
-  const costUsd = calcCostUsd(result.model, result.tokensIn, result.tokensOut, result.tokensCached);
-  await saveTokenUsage({
+  // Salva tokens. `buildTokenLogEntry` (services/pricing.ts) é quem grava
+  // `pricing_version: 2` — ver SPEC-01 na migration 20260822143000. Reaproveita
+  // o mesmo cálculo pra `costUsd` abaixo em vez de rodar `calcCostUsd` de novo.
+  const tokenEntry = buildTokenLogEntry({
     agent_id: req.agent_id,
     conversation_id: req.conversation_id,
     lead_id: req.lead_id,
-    model_provider: inferModelProvider(result.model),
-    model_name: result.model,
-    input_tokens: result.tokensIn,
-    output_tokens: result.tokensOut,
-    total_tokens: result.tokensIn + result.tokensOut,
-    estimated_cost_usd: costUsd,
-    cached_input_tokens: result.tokensCached,
+    model: result.model,
+    tokensIn: result.tokensIn,
+    tokensOut: result.tokensOut,
+    tokensCached: result.tokensCached,
   });
+  const costUsd = tokenEntry.estimated_cost_usd;
+  await saveTokenUsage(tokenEntry);
 
   const pctCache = result.tokensIn > 0 ? Math.round((result.tokensCached / result.tokensIn) * 100) : 0;
   console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} cached=${result.tokensCached} (${pctCache}%) executorCalled=${result.executorTrace.called}`);

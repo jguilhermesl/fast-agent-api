@@ -111,7 +111,7 @@ export async function saveTokenUsage(entry: TokenLogEntry): Promise<void> {
 
 // Tarifa e custo moram em ./pricing — aritmética pura, testável sem env nem rede.
 // Reexportados aqui para não quebrar quem já importava daqui.
-export { calcCostUsd, inferModelProvider } from './pricing';
+export { calcCostUsd, inferModelProvider, buildTokenLogEntry, CURRENT_PRICING_VERSION } from './pricing';
 
 // ── Error logging ─────────────────────────────────────────────
 
