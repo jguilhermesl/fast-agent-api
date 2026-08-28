@@ -7,7 +7,21 @@ export const supabase = createClient(config.supabaseUrl, config.supabaseServiceK
 
 // ── Intents ──────────────────────────────────────────────────
 
-export async function getAgentIntents(agentId: string): Promise<AgentIntent[]> {
+/**
+ * Intents configuradas do agente.
+ *
+ * Devolve `null` quando a LEITURA falhou (erro do Supabase) e `[]` quando o
+ * agente de fato não tem nenhuma intent cadastrada — são coisas diferentes pra
+ * quem decide em cima do resultado. O `agendamento-guard` (via orchestrator.ts)
+ * usa "agente sem intent de criação" pra concluir "não é agenda, nada a fazer"
+ * (`{acao:'nada'}`); antes, um erro TRANSITÓRIO de rede virava `[]` e o guard
+ * tomava a MESMA decisão que tomaria pra um agente sem agenda de verdade —
+ * reabrindo exatamente o bug que o commit afaff0c fechou (confirmar
+ * agendamento sem criar o evento). Cada chamador decide como reagir a `null`;
+ * nenhum é obrigado a travar o turno do cliente por isso (o comportamento
+ * final continua fail-open — só o log deixa de mentir sobre o motivo).
+ */
+export async function getAgentIntents(agentId: string): Promise<AgentIntent[] | null> {
   const { data, error } = await supabase
     .from('agent_intents')
     .select('id, slug, trigger_description, request_schema')
@@ -15,7 +29,7 @@ export async function getAgentIntents(agentId: string): Promise<AgentIntent[]> {
 
   if (error) {
     console.error('[Supabase] getAgentIntents error:', error.message);
-    return [];
+    return null;
   }
   return data ?? [];
 }

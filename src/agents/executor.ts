@@ -196,10 +196,19 @@ export interface ExecutorResult {
 }
 
 export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult> {
-  const [intents, intentLogs] = await Promise.all([
+  const [intentsOuNull, intentLogs] = await Promise.all([
     getAgentIntents(input.agent_id),
     getIntentLogs(input.agent_id, input.conversation_id),
   ]);
+
+  // `null` = erro de leitura no Supabase, distinto de "agente sem intents"
+  // ([]). Aqui o fail-open é tratar como sem intents dinâmicas neste turno —
+  // mas com log explícito, pra não confundir com o caso real na hora de
+  // investigar um agente que "esqueceu" de chamar uma intent.
+  if (intentsOuNull === null) {
+    console.error(`[Executor] getAgentIntents falhou (erro de leitura) — turno segue sem intents dinâmicas (agent_id=${input.agent_id})`);
+  }
+  const intents = intentsOuNull ?? [];
 
   // Cria tools dinâmicas a partir das intents do banco
   const dynamicTools = createDynamicToolsFromIntents(intents);

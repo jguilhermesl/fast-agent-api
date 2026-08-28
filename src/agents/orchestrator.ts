@@ -523,31 +523,43 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   // sem que o evento exista. Só toca a rede quando o texto casa o padrão de
   // confirmação — nos demais turnos o custo é uma regex.
   if (afirmaAgendamento(parsed.mensagens)) {
-    const [intents, jaTemCompromisso, logsDaConversa] = await Promise.all([
+    const [intentsOuNull, jaTemCompromisso, logsDaConversa] = await Promise.all([
       getAgentIntents(req.agent_id),
       conversaTemCompromissoCriado(req.agent_id, req.conversation_id),
       getIntentLogsCompletos(req.agent_id, req.conversation_id),
     ]);
 
-    const veredito = await garantirAgendamento({
-      agent_id: req.agent_id,
-      conversation_id: req.conversation_id,
-      lead_id: req.lead_id,
-      contact_phone: req.contact_phone,
-      intents,
-      jaTemCompromisso,
-      logsDaConversa,
-      toolsDoTurno: result.executorTrace.tools_called,
-      mensagens: parsed.mensagens,
-    });
+    if (intentsOuNull === null) {
+      // `null` = a LEITURA falhou (erro do Supabase), diferente de "agente sem
+      // agenda" ([]). Antes, os dois casos viravam [] e o guard tomava a MESMA
+      // decisão ({acao:'nada'}) — reabrindo o bug que o commit afaff0c fechou
+      // (confirmar agendamento sem criar evento) toda vez que a leitura
+      // falhasse de forma transitória. Fail-open no resultado final (a resposta
+      // do cliente segue intacta, igual ao guard normal), mas com log explícito
+      // — quem investigar não pode confundir "não sei se tem agenda" com "não
+      // tem agenda".
+      console.error(`[Orchestrator] getAgentIntents falhou (erro de leitura) — guard de agendamento pulado neste turno (agent_id=${req.agent_id}, conversation_id=${req.conversation_id})`);
+    } else {
+      const veredito = await garantirAgendamento({
+        agent_id: req.agent_id,
+        conversation_id: req.conversation_id,
+        lead_id: req.lead_id,
+        contact_phone: req.contact_phone,
+        intents: intentsOuNull,
+        jaTemCompromisso,
+        logsDaConversa,
+        toolsDoTurno: result.executorTrace.tools_called,
+        mensagens: parsed.mensagens,
+      });
 
-    if (veredito.acao === 'reoferta') {
-      // Troca só o texto. `redirect_human`/`transfer_reason` são preservados:
-      // se o mesmo turno também pedia transferência, o guard não pode cancelá-la.
-      parsed = { ...parsed, mensagens: veredito.mensagens };
+      if (veredito.acao === 'reoferta') {
+        // Troca só o texto. `redirect_human`/`transfer_reason` são preservados:
+        // se o mesmo turno também pedia transferência, o guard não pode cancelá-la.
+        parsed = { ...parsed, mensagens: veredito.mensagens };
+      }
+      // 'reparado': o evento passou a existir, a confirmação original vale.
+      // 'nada': caminho feliz — o evento já estava criado.
     }
-    // 'reparado': o evento passou a existir, a confirmação original vale.
-    // 'nada': caminho feliz — o evento já estava criado.
   }
 
   // Atualiza histórico Redis — salva o texto limpo das mensagens, não o JSON bruto.
