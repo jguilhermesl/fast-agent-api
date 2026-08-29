@@ -323,7 +323,15 @@ export async function updateLeadLastMessageAt(
 // ── Knowledge base (vector search) ───────────────────────────
 
 const KB_MATCH_COUNT   = 3;    // máximo de chunks retornados
-const KB_MIN_SIMILARITY = 1.30; // descarta resultados pouco relevantes (similarity = 1 + cosseno, faixa 0-2; exige cosseno >= 0.30)
+// `match_documents` devolve `1 - (embedding <=> query)`, e `<=>` é DISTÂNCIA DE
+// COSSENO no pgvector — logo `similarity` é o cosseno puro, teto 1,0. O valor
+// anterior aqui era 1.30, apoiado num comentário que dizia "similarity = 1 + cosseno,
+// faixa 0-2". Não é: exigir 1,30 é exigir nota que não existe, e o filtro descartava
+// 100% dos chunks nos 12 agentes desde que foi escrito. A base de conhecimento
+// respondia "(nenhuma informação relevante)" em toda chamada, sem erro e sem log.
+// Medido em 28/08/2026 contra os treinamentos da Duda: texto que responde à pergunta
+// tira 0,41 a 0,53. 0.30 é o mesmo piso que a própria função SQL já aplica.
+const KB_MIN_SIMILARITY = 0.30;
 // Alinhado ao CHUNK_SIZE=6000 do generate-embedding (chat-flow-pilot-63): a
 // ingestão agora fatia o treinamento em pedaços de até 6000 chars, cada um
 // com embedding próprio. Cortar a leitura em 2000 mutilava um chunk inteiro
