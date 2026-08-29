@@ -326,9 +326,14 @@ const KB_MATCH_COUNT   = 3;    // máximo de chunks retornados
 // `match_documents` devolve `1 - (embedding <=> query)`, e `<=>` é DISTÂNCIA DE
 // COSSENO no pgvector — logo `similarity` é o cosseno puro, teto 1,0. O valor
 // anterior aqui era 1.30, apoiado num comentário que dizia "similarity = 1 + cosseno,
-// faixa 0-2". Não é: exigir 1,30 é exigir nota que não existe, e o filtro descartava
-// 100% dos chunks nos 12 agentes desde que foi escrito. A base de conhecimento
-// respondia "(nenhuma informação relevante)" em toda chamada, sem erro e sem log.
+// faixa 0-2". Isso era verdade quando a função usava `<#>` (produto interno negativo,
+// similarity = 1 + cosseno, faixa 0-2) — leitura registrada em 25/08/2026. Em algum
+// ponto entre 25/08 e 28/08 a função passou a usar `<=>`, aplicada direto no banco,
+// fora de migration: a migration `20260828170000_versiona_match_documents` é uma
+// transcrição do que já rodava, não a mudança. Desde essa troca, e sem qualquer
+// aviso, o filtro descarta 100% dos chunks nos 12 agentes: a base responde
+// "(nenhuma informação relevante)" em toda chamada, sem erro e sem log de falha.
+// Não há trilha de quem trocou o operador nem de quando.
 // Medido em 28/08/2026 contra os treinamentos da Duda: texto que responde à pergunta
 // tira 0,41 a 0,53. 0.30 é o mesmo piso que a própria função SQL já aplica.
 const KB_MIN_SIMILARITY = 0.30;
