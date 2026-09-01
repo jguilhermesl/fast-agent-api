@@ -68,6 +68,13 @@ const AFIRMACAO_RE = [
   /(est[áa]|ficou|foi) (tudo )?(agendad|confirmad|marcad|reservad)[oa]/i,
   /agendamento (est[áa] )?(confirmad|realizad|feit)[oa]/i,
   /consulta (est[áa]|ficou|foi) (agendad|marcad|confirmad)[oa]/i,
+  // "Sua consulta com Dr. X ficou para 01/09/2026" — a frase de confirmação
+  // PADRÃO da LP Saúde, que nenhum padrão acima alcançava: o sujeito e o verbo
+  // ficam separados pelo nome do profissional, e o complemento é "para <data>",
+  // não "agendada". Medido em 01/09/2026: `afirmaAgendamento` devolvia false
+  // para o texto exato que o cliente recebe, ou seja, o guard nunca rodava nesse
+  // tenant — e o motivo NÃO era a exclusão de "por ordem de chegada".
+  /\bsua (consulta|sess[ãa]o|avalia[çc][ãa]o|cirurgia|visita|reserva)[^.!?\n]{0,80}\b(ficou|est[áa]|foi)\s+(para|pra|em|no dia|agendad|marcad|confirmad)/i,
   /(agendei|marquei|reservei|confirmei) (seu|o seu|sua|a sua|pra voc[êe]|para voc[êe])/i,
   /te espero (hoje|amanh[ãa]|na|no|dia|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)/i,
   /nos vemos (hoje|amanh[ãa]|na|no|dia|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)/i,
@@ -120,8 +127,16 @@ const RELATORIO_INTERNO_RE = [
   /^conversa encerrada\s*:/i,
 ];
 
+// O ponto de "Dr." conta como fim de frase para as regex abaixo, que usam
+// `[^.!?\n]` para não atravessar sentença. Sem tirar essas abreviações,
+// "Sua consulta com Dr. João Silva ficou para 01/09" não casava — o guard
+// simplesmente não via a confirmação padrão da LP Saúde.
+function semAbreviacoes(texto: string): string {
+  return texto.replace(/\b(dr|dra|sr|sra|prof|profa)\./gi, '$1');
+}
+
 export function afirmaAgendamento(mensagens: string[]): boolean {
-  const texto = mensagens.join('\n');
+  const texto = semAbreviacoes(mensagens.join('\n'));
   if (!texto.trim()) return false;
   if (NAO_E_AFIRMACAO_RE.some((r) => r.test(texto))) return false;
   if (RELATORIO_INTERNO_RE.some((r) => r.test(texto))) return false;
@@ -261,6 +276,17 @@ function resultadoFalhou(result: unknown): boolean {
   const obj = typeof result === 'string' ? tentarParse(result) : result;
   if (!obj || typeof obj !== 'object') return false;
   const r = obj as Record<string, unknown>;
+
+  // Envelope de `tools/envelope.ts`. Sem este ramo o guard leria `{status:'error'}`
+  // como sucesso — não há `success:false` nem `error` no topo — e voltaria a achar
+  // que o evento foi criado quando a intenção falhou. `empty` também conta como
+  // falha aqui: criação que não devolveu nada não criou nada.
+  if (typeof r.status === 'string' && 'query_echo' in r) {
+    if (r.status === 'error' || r.status === 'empty') return true;
+    // status 'ok': o payload real está em `data` — o veredito é sobre ele.
+    return resultadoFalhou(r.data);
+  }
+
   if (r.success === false) return true;
   if (typeof r.error === 'string' && r.error.trim() !== '') return true;
   return false;
