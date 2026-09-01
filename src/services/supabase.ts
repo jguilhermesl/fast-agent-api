@@ -146,6 +146,30 @@ export async function logError(params: {
   }
 }
 
+// ── Guard de grounding: log em shadow ─────────────────────────
+// Nunca pode derrubar a resposta do cliente: qualquer erro aqui só vira console.
+// A tabela nasce com retenção de 14 dias (migration 20260901210000) — o banco é
+// Micro e já caiu inteiro por tabela de log sem poda.
+
+export async function logGuardShadow(params: {
+  agent_id: string;
+  conversation_id: string;
+  lead_id: string;
+  verdict: string;
+  tokens: string[];
+  mensagens: string[];
+  tools_called: string[];
+  tipos_pedidos?: string[];
+  guard_mode: string;
+}): Promise<void> {
+  try {
+    const { error } = await supabase.from('guard_shadow_logs').insert(params);
+    if (error) console.error('[Supabase] logGuardShadow error:', error.message);
+  } catch (err: unknown) {
+    console.error('[Supabase] logGuardShadow throw:', err instanceof Error ? err.message : String(err));
+  }
+}
+
 // ── Send-external: conversation context ───────────────────────
 
 export interface ConversationContext {
