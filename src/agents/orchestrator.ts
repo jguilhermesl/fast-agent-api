@@ -9,9 +9,12 @@ import {
   getAgentIntents,
   getIntentLogsCompletos,
   conversaTemCompromissoCriado,
+  logGuardShadow,
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
+import { checarGrounding, checarTarefaSemFerramenta, MENSAGEM_SEM_LASTRO } from './guard';
+import { isGreetingOrFarewell } from './saudacao';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, type Deadline } from '../services/deadline';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
@@ -40,15 +43,9 @@ const anthropic = new Anthropic({ apiKey: config.anthropicApiKey, timeout: LLM_T
 
 const MAX_TOOL_ROUNDS = 5;
 
-// ── Detecção de saudação/despedida pura ──────────────────────
+// Detecção de saudação/despedida pura: `./saudacao.ts` (função pura, com teste).
 // Mensagens curtas de cumprimento não precisam de busca na base de conhecimento.
 // Para tudo o mais, forçamos o executor no primeiro round.
-
-const GREETING_PATTERNS = [
-  /^(oi|olá|ola|hey|hi|hello|e aí|eai|eae|opa|oie)\b/i,
-  /^(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\b/i,
-  /^(tchau|até mais|ate mais|até logo|ate logo|adeus|flw|falou|valeu|obrigad[oa]|muito obrigad[oa]|thanks|thank you)\b/i,
-];
 
 const OBJECTION_PATTERNS = [
   /não[,\s]+(obrigad[oa]|quero|preciso|tenho interesse|vou|posso)/i,
@@ -60,13 +57,6 @@ const OBJECTION_PATTERNS = [
   /deixa\s+pra\s+lá|deixa\s+pra\s+la|esquece|desisti/i,
   /outro\s+momento|não\s+é\s+pra\s+mim|nao\s+e\s+pra\s+mim/i,
 ];
-
-function isGreetingOrFarewell(message: string): boolean {
-  const trimmed = message.trim();
-  // Só aplica a mensagens curtas — saudações puras raramente passam de 50 chars
-  if (trimmed.length > 50) return false;
-  return GREETING_PATTERNS.some((p) => p.test(trimmed));
-}
 
 function isObjection(message: string): boolean {
   const trimmed = message.trim();
@@ -160,6 +150,22 @@ function makeFallback(history: ChatMessage[], logs?: Partial<ExecutionLogs>): Ch
 
 type ParsedOutput = { mensagens: string[]; redirect_human: boolean; transfer_reason?: string };
 
+// Uma string do array `mensagens` que ainda tem cara de JSON é JSON duplo-codificado:
+// o parse externo teve sucesso e o objeto interno ia limpo para o cliente. Foi o
+// vazamento de 08 e 10/08/2026 ("(*mensagens*:[*Perfeito, ...").
+function pareceJson(s: string): boolean {
+  const t = s.trim();
+  return (
+    /"(mensagens|mensagem|redirect_human|transfer_reason)"\s*:/.test(t) ||
+    (t.startsWith('{') && t.endsWith('}') && /"[^"]+"\s*:/.test(t))
+  );
+}
+
+function extrairReason(raw: string): string | undefined {
+  const m = raw.match(/"transfer_reason"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  return m?.[1]?.trim() || undefined;
+}
+
 function normalizeparsed(parsed: Record<string, unknown>): ParsedOutput | null {
   const redirect = Boolean(parsed.redirect_human ?? false);
   const reason   = redirect && typeof parsed.transfer_reason === 'string' && parsed.transfer_reason.trim()
@@ -168,7 +174,9 @@ function normalizeparsed(parsed: Record<string, unknown>): ParsedOutput | null {
 
   // { mensagens: string[] }
   if (Array.isArray(parsed.mensagens)) {
-    const mensagens = parsed.mensagens.map(String).filter((m) => m.trim() !== '');
+    const mensagens = parsed.mensagens.map(String).filter((m) => m.trim() !== '' && !pareceJson(m));
+    // Sobrou nada depois de filtrar: cai no fallback em vez de responder vazio.
+    if (mensagens.length === 0) return null;
     return { mensagens, redirect_human: redirect, transfer_reason: reason };
   }
 
@@ -210,9 +218,12 @@ function parseOrchestratorOutput(raw: string): ParsedOutput {
       .map((m) => m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim())
       .filter((t) => t !== '');
     if (textos.length) {
+      // `transfer_reason` caía no chão aqui: o pedido de humano chegava sem motivo.
+      const red = /"redirect_human"\s*:\s*true/.test(raw);
       return {
         mensagens: textos,
-        redirect_human: /"redirect_human"\s*:\s*true/.test(raw),
+        redirect_human: red,
+        transfer_reason: red ? extrairReason(raw) : undefined,
       };
     }
   }
@@ -227,7 +238,13 @@ function parseOrchestratorOutput(raw: string): ParsedOutput {
   const objetoFechado = text.startsWith('{') && text.endsWith('}') && /"[^"]+"\s*:/.test(text);
   if (!text || temCampoConhecido || objetoFechado) {
     console.error('[Orchestrator] Saída não parseável:', text.slice(0, 500));
-    return { mensagens: [fallbackMsg], redirect_human: false };
+    // Saída ilegível é falha nossa, não "está tudo bem". Antes devolvia
+    // redirect_human:false hardcoded e um pedido genuíno de humano sumia.
+    return {
+      mensagens: [fallbackMsg],
+      redirect_human: true,
+      transfer_reason: extrairReason(raw) ?? 'Saída do modelo não parseável',
+    };
   }
 
   return {
@@ -552,6 +569,51 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
 
   let parsed = parseOrchestratorOutput(result.output);
 
+  // ── Guard de grounding (src/agents/guard.ts) ──────────────────
+  // Duas checagens determinísticas, sem LLM e sem rede. Em `shadow` (padrão) só
+  // grava o veredito; em `enforce` troca o texto por um pedido de tempo. O caso
+  // que motivou: tarefa VENDA pedida, Executor chamou só o CRM, e o Orquestrador
+  // inventou preço, horário e nome de médico (31/08/2026, lead 50404509).
+  const vereditoTarefa = checarTarefaSemFerramenta(
+    result.communications[0]?.query,
+    result.executorTrace.tools_called,
+  );
+  const vereditoGrounding = checarGrounding({
+    mensagens: parsed.mensagens,
+    toolResults: result.communications.map((c) => c.result).join('\n'),
+    clientMessage: req.client_messages,
+    history: history.map((m) => m.content).join('\n'),
+    systemPrompt: req.system_prompt,
+  });
+
+  const semLastro =
+    vereditoGrounding.verdict === 'ungrounded' &&
+    vereditoTarefa.verdict === 'tarefa_sem_ferramenta';
+
+  if (vereditoGrounding.verdict !== 'ok' || vereditoTarefa.verdict !== 'ok') {
+    await logGuardShadow({
+      agent_id: req.agent_id,
+      conversation_id: req.conversation_id,
+      lead_id: req.lead_id,
+      verdict: semLastro ? 'ungrounded_sem_ferramenta' : `${vereditoGrounding.verdict}|${vereditoTarefa.verdict}`,
+      tokens: vereditoGrounding.tokens_sem_lastro,
+      mensagens: parsed.mensagens,
+      tools_called: vereditoTarefa.tools_chamadas,
+      tipos_pedidos: vereditoTarefa.tipos_pedidos,
+      guard_mode: config.guardMode,
+    });
+  }
+
+  // Só bloqueia na interseção das duas evidências: token sem lastro NENHUM **e**
+  // nenhuma ferramenta de negócio no turno. Uma sozinha gera falso positivo
+  // demais (valor que mora na persona, tarefa resolvida pelo histórico).
+  if (config.guardMode === 'enforce' && semLastro) {
+    console.error(
+      `[Guard] resposta sem lastro bloqueada — tokens=${vereditoGrounding.tokens_sem_lastro.join(',')} tipos=${vereditoTarefa.tipos_pedidos.join(',')} (lead ${req.lead_id})`,
+    );
+    parsed = { ...parsed, mensagens: MENSAGEM_SEM_LASTRO };
+  }
+
   // Guard de agendamento: a resposta não pode afirmar que o horário está marcado
   // sem que o evento exista. Só toca a rede quando o texto casa o padrão de
   // confirmação — nos demais turnos o custo é uma regex.
@@ -584,6 +646,22 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
         toolsDoTurno: result.executorTrace.tools_called,
         mensagens: parsed.mensagens,
       });
+
+      if (veredito.acao === 'detectado') {
+        // Fantasma visto num agente cujo reparo não é suportado (Duda, Carol):
+        // a resposta segue intacta e o sinal vira linha auditável.
+        await logGuardShadow({
+          agent_id: req.agent_id,
+          conversation_id: req.conversation_id,
+          lead_id: req.lead_id,
+          verdict: 'agendamento_sem_intent',
+          tokens: veredito.iso ? [veredito.iso] : [],
+          mensagens: parsed.mensagens,
+          tools_called: result.executorTrace.tools_called.map((t) => t.tool),
+          tipos_pedidos: [veredito.slug],
+          guard_mode: config.guardMode,
+        });
+      }
 
       if (veredito.acao === 'reoferta') {
         // Troca só o texto. `redirect_human`/`transfer_reason` são preservados:

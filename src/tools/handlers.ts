@@ -3,7 +3,12 @@ import OpenAI from 'openai';
 import { config } from '../config';
 import { searchKnowledgeBase } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
+import { wrap, wrapError } from './envelope';
 import type { ExecutorInput } from '../types';
+
+// Todo handler devolve o envelope de `envelope.ts`. O modelo lê `status` antes de
+// `data`, então "não achei" e "falhou" deixam de ser indistinguíveis de "achei".
+const ORCAMENTO_ESGOTADO = { message: 'orçamento de tempo do turno esgotado', code: 'DEADLINE_EXCEEDED' };
 
 const openai = new OpenAI({ apiKey: config.openaiApiKey });
 
@@ -18,7 +23,7 @@ export async function handleExecutarIntent(
   // sozinho consegue esgotar o orçamento inteiro do request.
   if (ctx.deadline?.expired()) {
     console.warn(`[Tool] executar_intent "${args.intent_key}" abortado — orçamento do turno esgotado`);
-    return JSON.stringify({ success: false, error: 'orçamento de tempo do turno esgotado' });
+    return wrapError({ message: ORCAMENTO_ESGOTADO.message, code: ORCAMENTO_ESGOTADO.code }, { intent_key: args.intent_key, ...args.arguments });
   }
   try {
     const body = {
@@ -39,11 +44,18 @@ export async function handleExecutarIntent(
         timeout: capTimeout(120_000, ctx.deadline),
       }
     );
-    return JSON.stringify(response.data);
+    return wrap(response.data, { intent_key: args.intent_key, ...args.arguments }, response.status);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[Tool] executar_intent "${args.intent_key}" error:`, msg);
-    return JSON.stringify({ success: false, error: msg });
+    // `err.message` de um 4xx é só "Request failed with status code 400". O motivo
+    // está em `err.response.data`, que antes ia para o chão — era aqui que os HTTP
+    // 400 do intent-dispatcher morriam e viravam "informação não disponível".
+    const st = axios.isAxiosError(err) ? err.response?.status : undefined;
+    const body = axios.isAxiosError(err) ? err.response?.data : undefined;
+    console.error(
+      `[Tool] executar_intent "${args.intent_key}" HTTP ${st ?? 'n/a'}:`,
+      JSON.stringify(body ?? (err instanceof Error ? err.message : String(err))).slice(0, 500),
+    );
+    return wrapError(err, { intent_key: args.intent_key, ...args.arguments });
   }
 }
 
@@ -55,7 +67,7 @@ export async function handleAtualizarLeadCRM(
 ): Promise<string> {
   if (ctx.deadline?.expired()) {
     console.warn('[Tool] atualizar_lead_crm abortado — orçamento do turno esgotado');
-    return JSON.stringify({ success: false, error: 'orçamento de tempo do turno esgotado' });
+    return wrapError(ORCAMENTO_ESGOTADO, { stage: args.stage });
   }
   try {
     const response = await axios.post(
@@ -76,11 +88,15 @@ export async function handleAtualizarLeadCRM(
         timeout: capTimeout(10_000, ctx.deadline),
       }
     );
-    return JSON.stringify(response.data ?? { success: true });
+    return wrap(response.data ?? { success: true }, { stage: args.stage }, response.status);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Tool] atualizar_lead_crm error:', msg);
-    return JSON.stringify({ success: false, error: msg });
+    const st = axios.isAxiosError(err) ? err.response?.status : undefined;
+    const body = axios.isAxiosError(err) ? err.response?.data : undefined;
+    console.error(
+      `[Tool] atualizar_lead_crm HTTP ${st ?? 'n/a'}:`,
+      JSON.stringify(body ?? (err instanceof Error ? err.message : String(err))).slice(0, 500),
+    );
+    return wrapError(err, { stage: args.stage });
   }
 }
 
@@ -92,7 +108,7 @@ export async function handleEnviarArquivo(
 ): Promise<string> {
   if (ctx.deadline?.expired()) {
     console.warn('[Tool] enviar_arquivo abortado — orçamento do turno esgotado');
-    return JSON.stringify({ success: false, error: 'orçamento de tempo do turno esgotado' });
+    return wrapError(ORCAMENTO_ESGOTADO, { file_url: args.file_url });
   }
   try {
     const response = await axios.post(
@@ -110,11 +126,15 @@ export async function handleEnviarArquivo(
         timeout: capTimeout(15_000, ctx.deadline),
       }
     );
-    return JSON.stringify(response.data ?? { success: true });
+    return wrap(response.data ?? { success: true }, { file_url: args.file_url }, response.status);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Tool] enviar_arquivo error:', msg);
-    return JSON.stringify({ success: false, error: msg });
+    const st = axios.isAxiosError(err) ? err.response?.status : undefined;
+    const body = axios.isAxiosError(err) ? err.response?.data : undefined;
+    console.error(
+      `[Tool] enviar_arquivo HTTP ${st ?? 'n/a'}:`,
+      JSON.stringify(body ?? (err instanceof Error ? err.message : String(err))).slice(0, 500),
+    );
+    return wrapError(err, { file_url: args.file_url });
   }
 }
 
@@ -126,7 +146,7 @@ export async function handleKnowledgeBase(
 ): Promise<string> {
   if (ctx.deadline?.expired()) {
     console.warn('[Tool] agent_knowledge_base abortado — orçamento do turno esgotado');
-    return '(orçamento de tempo do turno esgotado)';
+    return wrapError(ORCAMENTO_ESGOTADO, { query: args.query });
   }
   try {
     // Gera embedding da query
@@ -138,10 +158,17 @@ export async function handleKnowledgeBase(
 
     // Busca no Supabase Vector Store
     const result = await searchKnowledgeBase(ctx.agent_id, embedding);
-    return result;
+    // A KB devolve TEXTO, não JSON: as duas frases abaixo são o "não achei" dela.
+    // Sem traduzir para status='empty', o modelo lia a frase como conteúdo.
+    const vazio =
+      result.startsWith('(nenhuma informação relevante') ||
+      result.startsWith('(base de conhecimento indisponível');
+    return wrap(vazio ? [] : result, { query: args.query });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Tool] agent_knowledge_base error:', msg);
-    return '(erro ao buscar na base de conhecimento)';
+    console.error(
+      '[Tool] agent_knowledge_base error:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return wrapError(err, { query: args.query });
   }
 }

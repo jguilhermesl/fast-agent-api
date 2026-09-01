@@ -25,6 +25,13 @@ export const config = {
   // Z-API partner/client token (required as Client-Token header for all Z-API requests)
   zapiClientToken: process.env.ZAPI_CLIENT_TOKEN ?? '',
 
+  // Guard de grounding (src/agents/guard.ts). `shadow` só grava o veredito em
+  // guard_shadow_logs e deixa a resposta passar; `enforce` reescreve a resposta.
+  // É env var e não constante de propósito: desarmar o enforce em produção tem
+  // que levar segundos, sem redeploy. Nunca ligar `enforce` sem os 7 dias de
+  // shadow calibrados (SPEC-02 §7).
+  guardMode: (process.env.GUARD_MODE === 'enforce' ? 'enforce' : 'shadow') as 'shadow' | 'enforce',
+
   // A tabela de tarifas saiu daqui para `src/services/pricing.ts`, que espelha o
   // `llm_pricing` do Supabase e roda em teste sem env var. Enquanto morava neste
   // objeto, `gpt-5.4-mini` era cobrado na tarifa do `gpt-5.4` e ninguém tinha

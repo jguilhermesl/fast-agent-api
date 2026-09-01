@@ -43,6 +43,17 @@ async function executarIntentPadrao(
 export const SLUG_CRIACAO_RE =
   /criar_evento|create_event|realizar_agendament|agendar_(consulta|servico|serviço|horario|horário|sessao|sessão)/i;
 
+// Quais desses o guard sabe REPARAR sozinho.
+//
+// O reparo monta `{action:'create_event', startDateTime}` — o contrato do
+// calendar-proxy (Leandro, Dani, Lidiane). `realizar_agendamento` (Duda, Carol) é
+// outro contrato: exige `nome`, `data`, `especialidade`, `valor` e `doutor`, que
+// o guard não tem como inventar — e inventar aqui seria repetir o defeito que ele
+// existe para impedir. Nesses agentes o guard DETECTA e registra, sem tocar a
+// rede e sem mexer na resposta do cliente. A decisão do que fazer com o sinal
+// vem depois, com a medição em `guard_shadow_logs`.
+const SLUG_REPARAVEL_RE = /criar_evento|create_event/i;
+
 const SLUG_SLOTS_RE = /horarios_disponiveis|horários_disponíveis|available_slots|listar_horarios/i;
 
 // ── Detecção de confirmação ──────────────────────────────────
@@ -83,8 +94,14 @@ const NAO_E_AFIRMACAO_RE = [
   /\bj[áa]\s+(est[áa]|ficou|foi|se encontra)/i,
   /\bque j[áa] est[áa] confirmad/i,
 
-  // Explicação de política de atendimento, não confirmação de um horário
-  /por ordem de chegada/i,
+  // Explicação de política de atendimento, não confirmação de um horário.
+  // Estreitado em 01/09/2026: o padrão largo `/por ordem de chegada/i` desarmava
+  // o guard na frase de confirmação PADRÃO da LP Saúde ("Sua consulta ficou para
+  // 01/09. • Atendimento por ordem de chegada, chegue um pouco antes") — ou seja,
+  // o guard estava desligado para o tenant inteiro. Agora só casa a política dita
+  // como fato isolado ("o atendimento é por ordem de chegada"), que é o falso
+  // positivo que o padrão original queria cobrir.
+  /(atendimento|consulta|agendamento|marca[çc][ãa]o)\s+(é|e|ser[áa]|fica|funciona)\s+(sempre\s+)?(por\s+)?ordem de chegada/i,
   /o funcionamento [ée]/i,
 
   // Pedido de dado que falta
@@ -314,6 +331,7 @@ export interface ContextoReparo {
 export type ResultadoGuard =
   | { acao: 'nada' }                                        // caminho feliz ou fora de escopo
   | { acao: 'reparado'; slug: string; iso: string }          // evento criado sem o cliente perceber
+  | { acao: 'detectado'; slug: string; iso: string | null }  // fantasma visto, reparo não suportado
   | { acao: 'reoferta'; mensagens: string[]; motivo: string }; // criação recusada, agente reoferece
 
 export async function garantirAgendamento(ctx: ContextoReparo): Promise<ResultadoGuard> {
@@ -325,6 +343,18 @@ export async function garantirAgendamento(ctx: ContextoReparo): Promise<Resultad
 
     if (criouEventoNesteTurno(ctx.toolsDoTurno)) return { acao: 'nada' };
     if (ctx.jaTemCompromisso) return { acao: 'nada' };
+
+    // Agente cujo reparo automático não é suportado: só registra o fantasma.
+    // Nada de rede, nada de reescrever a resposta — em `realizar_agendamento` o
+    // guard não tem `nome`/`valor`/`especialidade` para montar a chamada.
+    if (!SLUG_REPARAVEL_RE.test(intentCriacao.slug)) {
+      const quandoDetectado = extrairDataHora(ctx.mensagens, ctx.agora ?? new Date());
+      console.error(
+        `[Guard] agendamento fantasma DETECTADO (reparo nao suportado para "${intentCriacao.slug}") — ` +
+        `quando=${quandoDetectado?.iso ?? 'ilegivel'} lead=${ctx.lead_id}`,
+      );
+      return { acao: 'detectado', slug: intentCriacao.slug, iso: quandoDetectado?.iso ?? null };
+    }
 
     const quando = extrairDataHora(ctx.mensagens, ctx.agora ?? new Date());
     if (!quando) {
