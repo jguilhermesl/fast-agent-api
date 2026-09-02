@@ -13,7 +13,7 @@ import {
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
-import { checarGrounding, checarTarefaSemFerramenta, MENSAGEM_SEM_LASTRO } from './guard';
+import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { isGreetingOrFarewell } from './saudacao';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, type Deadline } from '../services/deadline';
@@ -582,7 +582,9 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     mensagens: parsed.mensagens,
     toolResults: result.communications.map((c) => c.result).join('\n'),
     clientMessage: req.client_messages,
-    history: history.map((m) => m.content).join('\n'),
+    // NÃO é `history` inteiro: fala do agente em turno sem ferramenta de negócio
+    // fica de fora, senão a alucinação de um turno vira lastro do turno seguinte.
+    history: historicoConfiavel(history),
     systemPrompt: req.system_prompt,
   });
 

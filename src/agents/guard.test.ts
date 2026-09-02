@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { checarGrounding, checarTarefaSemFerramenta } from './guard';
-import type { ToolCallLog } from '../types';
+import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel } from './guard';
+import type { ChatMessage, ToolCallLog } from '../types';
 
 const tool = (nome: string): ToolCallLog => ({ tool: nome, arguments: {}, result: {} } as ToolCallLog);
 
@@ -93,5 +93,73 @@ describe('checarGrounding', () => {
   it('ignora número longo demais para ser preço ou horário (telefone)', () => {
     const v = checarGrounding({ ...vazio, mensagens: ['Meu contato é 5581994933356.'] });
     expect(v.tokens_sem_lastro).toEqual([]);
+  });
+
+  // Os três casos abaixo eram falso positivo medido em tráfego real (01-02/09/2026).
+  it('"às 15h" e "15:00" são o mesmo horário', () => {
+    const v = checarGrounding({ ...vazio, mensagens: ['Fica às 15h então.'], toolResults: 'slot 15:00 ordem de chegada' });
+    expect(v.verdict).toBe('ok');
+  });
+
+  it('"01/09" e "01/09/2026" são a mesma data', () => {
+    const v = checarGrounding({ ...vazio, mensagens: ['Tenho 01/09.'], toolResults: 'terça, 01/09/2026 - 09:30' });
+    expect(v.verdict).toBe('ok');
+  });
+
+  it('não gera token de 2 dígitos solto (era o ruído que marcava a Carol)', () => {
+    const v = checarGrounding({ ...vazio, mensagens: ['Item 22 da lista, seção 08.'] });
+    expect(v.tokens_sem_lastro).toEqual([]);
+  });
+});
+
+describe('historicoConfiavel — a alucinação não pode servir de lastro para si mesma', () => {
+  // Reproduz o incidente: no turno 1 o agente inventou "R$ 100,00" sem chamar
+  // ferramenta nenhuma. Testado contra o lead real 50404509: com o histórico
+  // inteiro no corpus, o guard dava `ok` em TODOS os turnos, inclusive nos que
+  // inventaram preço e horário.
+  const historico: ChatMessage[] = [
+    { role: 'user', content: 'Tem atendimento com o clínico no horário da tarde?' },
+    { role: 'assistant', content: 'Consulta: R$ 100,00 — 31/08 às 13:00', tools: ['atualizar_lead_crm'] },
+    { role: 'user', content: 'Amanhã a tarde tem ?' },
+  ];
+
+  it('descarta fala do agente em turno que só mexeu no CRM', () => {
+    const corpus = historicoConfiavel(historico);
+    expect(corpus).not.toContain('R$ 100,00');
+    expect(corpus).toContain('Amanhã a tarde tem ?');
+  });
+
+  it('mantém fala do agente quando o turno rodou ferramenta de negócio', () => {
+    const comBusca: ChatMessage[] = [
+      { role: 'assistant', content: 'A consulta é R$ 85,00', tools: ['conferir_especialidades', 'atualizar_lead_crm'] },
+    ];
+    expect(historicoConfiavel(comBusca)).toContain('R$ 85,00');
+  });
+
+  it('mantém tudo que o cliente disse', () => {
+    expect(historicoConfiavel([{ role: 'user', content: 'pode ser às 15h?' }])).toContain('15h');
+  });
+
+  it('com o corpus certo, o turno 2 do incidente é acusado', () => {
+    const v = checarGrounding({
+      mensagens: ['💰 Valor: R$ 100,00', '🩺 *Dr. João Silva*', '• Terça-feira, 01/09 às 15h'],
+      toolResults: '### CRM\nEstágio do lead atualizado para orçamento.',
+      clientMessage: 'Amanhã a tarde tem ?',
+      history: historicoConfiavel(historico),
+      systemPrompt: 'Persona sem preço de clínico geral.',
+    });
+    expect(v.verdict).toBe('ungrounded');
+    expect(v.tokens_sem_lastro).toContain('10000');
+  });
+
+  it('e com o histórico INTEIRO ele deixa passar — a prova do defeito', () => {
+    const v = checarGrounding({
+      mensagens: ['💰 Valor: R$ 100,00'],
+      toolResults: '### CRM',
+      clientMessage: 'Amanhã a tarde tem ?',
+      history: historico.map((m) => m.content).join('\n'), // o jeito ANTIGO
+      systemPrompt: 'Persona sem preço de clínico geral.',
+    });
+    expect(v.verdict).toBe('ok');
   });
 });
