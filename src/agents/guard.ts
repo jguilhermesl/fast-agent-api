@@ -17,7 +17,7 @@
 // Critério estreito de propósito: falso positivo aqui trava conversa de cliente
 // real. Por isso o padrão é shadow (`config.guardMode`).
 
-import type { ToolCallLog } from '../types';
+import type { ChatMessage, ToolCallLog } from '../types';
 
 // ── 1. Grounding por token literal ───────────────────────────
 
@@ -25,22 +25,44 @@ const RE_DINHEIRO = /R\$\s?\d[\d.\s]*(?:,\d{2})?/g;
 const RE_HORA = /\b([01]?\d|2[0-3])\s?(?:h|:)\s?([0-5]\d)?\b/g;
 const RE_DATA = /\b([0-3]?\d)\/([01]?\d)(?:\/\d{2,4})?\b/g;
 
-/** "R$ 1.500,00" -> "150000" ; "09h" -> "09" ; "11/08" -> "1108" */
 function norm(s: string): string {
   return s.replace(/\D/g, '');
 }
 
+const pad2 = (s: string) => s.padStart(2, '0');
+
+/**
+ * Cada tipo vira uma forma canônica, senão o mesmo número escrito de dois jeitos
+ * conta como token diferente e vira falso positivo. Medido em 01-02/09/2026
+ * contra tráfego real, foi de onde vieram TODOS os falsos positivos:
+ *
+ *  - **hora sempre HHMM.** "às 15h" dava "15" e "15:00" dava "1500" — o mesmo
+ *    horário não casava consigo mesmo. Agora os dois dão "1500".
+ *  - **data só DDMM.** "01/09/2026" dava "01092026" e "01/09" dava "0109";
+ *    o agente escreve uma forma e a planilha devolve a outra.
+ *  - **mínimo de 3 dígitos.** Token de 2 dígitos é ruído: "22" e "08" soltos
+ *    marcaram 2 turnos da Carol como sem lastro sem nada de errado na mensagem.
+ *    Com a hora virando 4 dígitos, nada de sinal se perde nessa faixa.
+ */
 function extrairTokens(texto: string): string[] {
   const out = new Set<string>();
-  for (const re of [RE_DINHEIRO, RE_HORA, RE_DATA]) {
-    // `matchAll` exige a flag /g e consome o lastIndex — reinicia por segurança.
-    re.lastIndex = 0;
-    for (const m of texto.matchAll(re)) {
-      const n = norm(m[0]);
-      // <2 dígitos é ruído ("às 9"); >8 é CPF/telefone, não afirmação de agenda.
-      if (n.length >= 2 && n.length <= 8) out.add(n);
-    }
+
+  RE_DINHEIRO.lastIndex = 0;
+  for (const m of texto.matchAll(RE_DINHEIRO)) {
+    const n = norm(m[0]);
+    if (n.length >= 3 && n.length <= 8) out.add(n);
   }
+
+  RE_HORA.lastIndex = 0;
+  for (const m of texto.matchAll(RE_HORA)) {
+    out.add(pad2(m[1]) + pad2(m[2] ?? '00'));
+  }
+
+  RE_DATA.lastIndex = 0;
+  for (const m of texto.matchAll(RE_DATA)) {
+    out.add(pad2(m[1]) + pad2(m[2]));
+  }
+
   return [...out];
 }
 
@@ -51,11 +73,10 @@ export interface GuardVerdict {
 }
 
 /**
- * O corpus de grounding é DELIBERADAMENTE largo. Cada fonte aqui elimina uma
- * classe inteira de falso positivo:
+ * O corpus de grounding é largo, mas NÃO pode incluir tudo:
  *  - toolResults   : o caso legítimo (veio da planilha/agenda)
  *  - clientMessage : o agente ecoando o que o cliente propôs
- *  - history       : valor combinado três turnos atrás
+ *  - history       : ver `historicoConfiavel` abaixo — é a parte perigosa
  *  - systemPrompt  : preço que mora na persona (a KB da Duda foi migrada para o
  *                    prompt em 11/08 — sem isto, falso positivo em massa)
  */
@@ -66,16 +87,56 @@ export function checarGrounding(input: {
   history: string;
   systemPrompt: string;
 }): GuardVerdict {
-  const corpus = norm(
-    [input.toolResults, input.clientMessage, input.history, input.systemPrompt].join(' '),
+  const texto = [input.toolResults, input.clientMessage, input.history, input.systemPrompt].join(' ');
+
+  // O corpus passa pela MESMA canonicalização das mensagens — senão "às 15h" na
+  // fala do cliente nunca casaria com "15:00" na agenda. Além dos tokens
+  // canônicos, guarda-se a sopa de dígitos crua: pega número escrito em formato
+  // que as três regex não cobrem, e erra para o lado permissivo (que é o certo
+  // aqui — falso positivo trava conversa de cliente real).
+  const canonicos = new Set(extrairTokens(texto));
+  const sopa = norm(texto);
+
+  const semLastro = extrairTokens(input.mensagens.join(' ')).filter(
+    (t) => !canonicos.has(t) && !sopa.includes(t),
   );
-  const semLastro = extrairTokens(input.mensagens.join(' ')).filter((t) => !corpus.includes(t));
 
   return {
     verdict: semLastro.length > 0 ? 'ungrounded' : 'ok',
     tokens_sem_lastro: semLastro,
-    corpus_bytes: corpus.length,
+    corpus_bytes: sopa.length,
   };
+}
+
+/**
+ * Monta a parte do corpus que vem do histórico — e é aqui que a primeira versão
+ * do guard morria.
+ *
+ * Testado contra o incidente real (lead 50404509, 31/08/2026): com o histórico
+ * inteiro no corpus, o guard dava `ok` em TODOS os turnos, inclusive nos que
+ * inventaram "R$ 100,00" e "01/09 às 15h". O motivo: no turno 2 o corpus já
+ * continha a fala do turno 1 — ou seja, **a alucinação servia de lastro para si
+ * mesma**. É exatamente o mecanismo do incidente (o Orquestrador lê o próprio
+ * texto no histórico e o trata como fato), então incluí-lo cega o guard no único
+ * caso que ele existe para pegar.
+ *
+ * Entra no corpus:
+ *  - toda fala do CLIENTE (ele é fonte legítima do que ele mesmo propôs);
+ *  - fala do agente APENAS quando aquele turno rodou ferramenta de negócio, isto
+ *    é, quando o número que ele disse veio de uma consulta de verdade.
+ *
+ * Fica de fora a fala do agente em turno sem ferramenta — que é, por definição,
+ * número que ele não foi buscar em lugar nenhum.
+ */
+export function historicoConfiavel(history: ChatMessage[]): string {
+  return history
+    .filter((m) => {
+      if (m.role === 'user') return true;
+      const tools = m.tools ?? [];
+      return tools.some((t) => !FERRAMENTAS_NAO_DE_NEGOCIO.has(t));
+    })
+    .map((m) => m.content)
+    .join('\n');
 }
 
 // ── 2. Tarefa de negócio sem ferramenta ──────────────────────
