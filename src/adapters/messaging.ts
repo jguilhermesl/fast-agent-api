@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { sentinelaEnvio500 } from './sentinela-500';
 
 // ── Adapter Interface ──────────────────────────────────────────
 
@@ -166,9 +167,13 @@ async function whatsbizapiSendMedia(
       // Treat 500 errors as success with a warning
       if (status === 500) {
         console.warn(`[WhatsBizAPI] ⚠️  ${type} sent with API error 500 (message likely delivered)`);
+        // Único por envio. A constante antiga produzia 211 linhas com o mesmo
+        // `provider_message_id`, e por isso o índice único da SPEC-06 teve de
+        // excluí-las — deixando justamente a janela de 500 sem deduplicação.
+        // Ver src/adapters/sentinela-500.ts.
         return {
           success: true,
-          providerMessageId: 'sent-with-500-error',
+          providerMessageId: sentinelaEnvio500(),
         };
       }
       
