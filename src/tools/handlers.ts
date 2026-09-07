@@ -102,6 +102,19 @@ export async function handleAtualizarLeadCRM(
 
 // ── enviar_arquivo ────────────────────────────────────────────
 
+/**
+ * Deduz o `type` que `/api/send-external` espera a partir da extensão do
+ * arquivo. `enviar_arquivo` só recebe `file_url` — não tem esse dado pronto.
+ */
+function tipoPorExtensao(fileUrl: string): 'image' | 'video' | 'audio' | 'document' {
+  const semQuery = fileUrl.split('?')[0].toLowerCase();
+  const ext = semQuery.slice(semQuery.lastIndexOf('.') + 1);
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return 'image';
+  if (['mp4', 'mov', 'webm', '3gp'].includes(ext)) return 'video';
+  if (['mp3', 'ogg', 'opus', 'wav', 'm4a', 'aac'].includes(ext)) return 'audio';
+  return 'document';
+}
+
 export async function handleEnviarArquivo(
   args: { file_url: string },
   ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id' | 'contact_phone' | 'deadline'>
@@ -111,16 +124,25 @@ export async function handleEnviarArquivo(
     return wrapError(ORCAMENTO_ESGOTADO, { file_url: args.file_url });
   }
   try {
+    // `enviar_arquivo` apontava para a Supabase Function `send-media`,
+    // congelada desde 03/03/2026 (código da era Chatwoot, apagado do repo,
+    // nunca redeployado — consulta `agents.chatwoot_inbox_id`, coluna que não
+    // existe mais). Falhava sempre: Duda e Diana, 30+ tentativas em 2 meses.
+    // `/api/send-external` é a rota que já manda mídia de verdade hoje (mesma
+    // que o `messaging-gateway` do chat-flow-pilot-63 chama pro canal
+    // WhatsBizAPI) — roda neste mesmo processo, então é loopback, não um
+    // serviço novo.
     const response = await axios.post(
-      `${config.supabaseUrl}/functions/v1/send-media`,
+      `http://localhost:${config.port}/api/send-external`,
       {
         agent_id: ctx.agent_id,
-        contact_phone: ctx.contact_phone,
-        file_url: args.file_url,
+        phone: ctx.contact_phone,
+        type: tipoPorExtensao(args.file_url),
+        media_url: args.file_url,
       },
       {
         headers: {
-          Authorization: `Bearer ${config.supabaseServiceKey}`,
+          Authorization: `Bearer ${config.apiSecret}`,
           'Content-Type': 'application/json',
         },
         timeout: capTimeout(15_000, ctx.deadline),
