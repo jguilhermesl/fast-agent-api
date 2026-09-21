@@ -32,6 +32,24 @@ function norm(s: string): string {
 const pad2 = (s: string) => s.padStart(2, '0');
 
 /**
+ * Converte qualquer grafia de dinheiro para **centavos**, que é a única forma em
+ * que "R$ 160" e "R$ 160,00" são o mesmo número.
+ *
+ *   "R$ 160"      -> "16000"
+ *   "R$ 160,00"   -> "16000"
+ *   "R$ 1.750,00" -> "175000"
+ *   "R$ 1.750"    -> "175000"
+ */
+function dinheiroEmCentavos(bruto: string): string | null {
+  const limpo = bruto.replace(/R\$/g, '').replace(/\s/g, '');
+  const [inteiroBruto, centavosBruto] = limpo.split(',');
+  const inteiro = inteiroBruto.replace(/\./g, '');
+  if (!inteiro) return null;
+  const centavos = (centavosBruto ?? '00').padEnd(2, '0').slice(0, 2);
+  return inteiro + centavos;
+}
+
+/**
  * Cada tipo vira uma forma canônica, senão o mesmo número escrito de dois jeitos
  * conta como token diferente e vira falso positivo. Medido em 01-02/09/2026
  * contra tráfego real, foi de onde vieram TODOS os falsos positivos:
@@ -40,6 +58,13 @@ const pad2 = (s: string) => s.padStart(2, '0');
  *    horário não casava consigo mesmo. Agora os dois dão "1500".
  *  - **data só DDMM.** "01/09/2026" dava "01092026" e "01/09" dava "0109";
  *    o agente escreve uma forma e a planilha devolve a outra.
+ *  - **dinheiro sempre em centavos.** Mesmo bug, descoberto em 21/09/2026: o
+ *    `system_prompt` da Duda diz "R$ 24 na LP Saúde mais R$ 136 na parceira,
+ *    total R$ 160" e a resposta sai "R$ 24,00 / R$ 136,00 / R$ 160,00". Sem
+ *    centavos dava "24"/"136"/"160", com centavos dava "2400"/"13600"/"16000",
+ *    e o valor que estava escrito na própria persona era marcado como sem
+ *    lastro. Foram os 9 únicos `ungrounded_sem_ferramenta` de 30 dias — todos
+ *    falso positivo, e todos no único caso em que o guard bloqueia de verdade.
  *  - **mínimo de 3 dígitos.** Token de 2 dígitos é ruído: "22" e "08" soltos
  *    marcaram 2 turnos da Carol como sem lastro sem nada de errado na mensagem.
  *    Com a hora virando 4 dígitos, nada de sinal se perde nessa faixa.
@@ -47,10 +72,16 @@ const pad2 = (s: string) => s.padStart(2, '0');
 function extrairTokens(texto: string): string[] {
   const out = new Set<string>();
 
+  // As DUAS formas entram, a canônica em centavos e a crua. A canônica é a que
+  // faz "R$ 160" casar com "R$ 160,00"; a crua é a rede para quando o valor
+  // aparece no corpus sem o "R$" (numa célula de planilha, por exemplo) e só a
+  // sopa de dígitos o alcança. Gerar as duas erra para o lado permissivo, que é
+  // o lado certo aqui: falso positivo trava conversa de cliente real.
   RE_DINHEIRO.lastIndex = 0;
   for (const m of texto.matchAll(RE_DINHEIRO)) {
-    const n = norm(m[0]);
-    if (n.length >= 3 && n.length <= 8) out.add(n);
+    for (const n of [dinheiroEmCentavos(m[0]), norm(m[0])]) {
+      if (n && n.length >= 3 && n.length <= 8) out.add(n);
+    }
   }
 
   RE_HORA.lastIndex = 0;
