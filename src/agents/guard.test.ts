@@ -63,6 +63,48 @@ describe('checarGrounding', () => {
     expect(v.tokens_sem_lastro).toContain('10000'); // R$ 100,00
   });
 
+  // Os 9 únicos `ungrounded_sem_ferramenta` de 30 dias, medidos em 21/09/2026,
+  // eram todos este caso: a persona escreve o valor SEM centavos e a resposta
+  // sai COM centavos. Era o falso positivo no único ponto em que o guard
+  // bloqueia de verdade (`enforce` só age na interseção das duas checagens).
+  it('aprova "R$ 160,00" quando a persona escreve "R$ 160" sem centavos', () => {
+    const v = checarGrounding({
+      ...vazio,
+      mensagens: ['Temos sim, por parceria. Valor total: R$ 160,00, sendo R$ 24,00 na LP Saúde e R$ 136,00 na parceira.'],
+      systemPrompt: 'Oftalmologia é fixa: R$ 24 na LP Saúde mais R$ 136 na parceira, total R$ 160.',
+    });
+    expect(v.verdict).toBe('ok');
+    expect(v.tokens_sem_lastro).toEqual([]);
+  });
+
+  it('aprova o caminho inverso: persona com centavos, resposta sem', () => {
+    const v = checarGrounding({
+      ...vazio,
+      mensagens: ['A consulta sai R$ 85.'],
+      systemPrompt: 'Clínico Geral: R$ 85,00 em até 2x sem juros.',
+    });
+    expect(v.verdict).toBe('ok');
+  });
+
+  it('aprova milhar com e sem centavos', () => {
+    const v = checarGrounding({
+      ...vazio,
+      mensagens: ['O pacote fica R$ 1.750,00 em até 10x.'],
+      systemPrompt: 'Neuropsicopedagogia: R$ 1.750 em até 10x sem juros.',
+    });
+    expect(v.verdict).toBe('ok');
+  });
+
+  it('continua acusando valor que não existe em fonte nenhuma, com ou sem centavos', () => {
+    const v = checarGrounding({
+      ...vazio,
+      mensagens: ['A consulta é R$ 999,00.'],
+      systemPrompt: 'Clínico Geral: R$ 85,00.',
+    });
+    expect(v.verdict).toBe('ungrounded');
+    expect(v.tokens_sem_lastro).toContain('99900');
+  });
+
   it('aprova quando o valor veio do retorno da ferramenta', () => {
     const v = checarGrounding({
       ...vazio,
