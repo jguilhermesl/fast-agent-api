@@ -91,6 +91,19 @@ describe('calcCostUsd — desconto de tokens cacheados', () => {
     // some em silêncio e o teste anterior continuaria verde.
     expect(tarifaDe('claude-sonnet-4-20250514').cached).toBeDefined();
     expect(tarifaDe('gpt-5.4-mini-2026-03-17').cached).toBeDefined();
+    expect(tarifaDe('gpt-5.6-terra').cached).toBeDefined();
+  });
+
+  // A Duda foi para gpt-5.6-terra em 22/09/2026 justamente para baratear. Sem a
+  // linha na tabela o modelo caía em TARIFA_DESCONHECIDA (1/3 por 1M) e o custo
+  // registrado era ficcao — 67% ACIMA do 5.4 por chamada, quando na verdade o
+  // 5.6 custa 20% menos. Tarifa oficial de 30/07/2026: 2 / 12 / 0.2.
+  it('conhece a tarifa do gpt-5.6-terra e ela é menor que a do 5.4', () => {
+    const t56 = tarifaDe('gpt-5.6-terra');
+    const t54 = tarifaDe('gpt-5.4');
+    expect(t56).toEqual({ input: 2, output: 12, cached: 0.2 });
+    expect(t56.input).toBeLessThan(t54.input);
+    expect(t56.output).toBeLessThan(t54.output);
   });
 });
 
