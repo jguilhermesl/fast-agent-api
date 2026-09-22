@@ -16,6 +16,14 @@ import {
 } from '../tools/definitions';
 import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 import { buildExecutorPrompt } from './executor-prompt';
+import { amostragemDoModelo } from './modelo-params';
+
+/**
+ * O Executor NÃO usa o `model_name` do agente: ele roda sempre neste modelo, que é
+ * mais barato e só precisa escolher ferramenta e preencher argumento. Trocar o
+ * modelo de um agente no painel muda o Orquestrador, não esta chamada.
+ */
+const MODELO_EXECUTOR = 'gpt-5.4-mini';
 
 // Mesmo teto de relógio do orquestrador (ver LLM_TIMEOUT_MS lá): antes o único
 // limite era de rodadas, e 8 rodadas sem timeout não têm teto de tempo nenhum.
@@ -128,11 +136,11 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     }
     rounds = round + 1;
     const response = await openai.chat.completions.create({
-      model: 'gpt-5.4-mini',
+      model: MODELO_EXECUTOR,
       messages,
       tools,
       tool_choice: 'auto',
-      temperature: 0.3,
+      ...amostragemDoModelo(MODELO_EXECUTOR, 0.3),
     }, { timeout: capTimeout(60_000, input.deadline) });
 
     const msg = response.choices[0].message;

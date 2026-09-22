@@ -14,6 +14,7 @@ import {
 import { runExecutor } from './executor';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
+import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, type Deadline } from '../services/deadline';
@@ -302,7 +303,9 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
       messages,
       tools,
       tool_choice: toolChoice,
-      temperature: 0.2,
+      // gpt-5.6 recusa `temperature` e exige `reasoning_effort: 'none'` para
+      // aceitar function tools aqui; o resto segue com temperatura fixa.
+      ...amostragemDoModelo(req.model_name, 0.2),
     }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
 
     const msg = response.choices[0].message;
