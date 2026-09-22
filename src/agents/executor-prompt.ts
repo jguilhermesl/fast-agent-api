@@ -55,6 +55,7 @@ Antes de chamar QUALQUER intent ou tool (exceto CRM e TRANSFERÊNCIA), verifique
 ## Regra de deduplicação — não repita o que já foi feito
 Antes de chamar uma intent, consulte \`<acoes_executadas>\`.
 - Se a mesma intent já foi executada com sucesso com argumentos equivalentes nesta conversa → **não execute novamente**. Use o resultado anterior.
+- Isto vale com força total para as intents de **texto fixo** (as que não recebem argumento e mandam a mensagem direto ao cliente, como as \`enviar_detalhes_*\`): uma execução bem-sucedida nesta conversa já entregou o texto, e chamar de novo reenvia a mesma mensagem e irrita. Responda a pergunta seguinte com suas próprias palavras, a partir do que já foi dito.
 - Se foi executada mas falhou → pode tentar novamente se o contexto mudou.
 
 # FERRAMENTAS DISPONÍVEIS
