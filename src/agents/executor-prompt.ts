@@ -34,6 +34,48 @@ export function getCurrentDateBR(): string {
   });
 }
 
+/** O que `formatIntentLogs` lê de cada linha de `intent_execution_logs`. */
+export interface IntentLogLinha {
+  intent_key: string;
+  arguments: unknown;
+  success: boolean;
+  created_at: string;
+}
+
+/**
+ * Monta o bloco <acoes_executadas>.
+ *
+ * Leva DATA e hora, no fuso de <data_atual>. Até 23/09/2026 levava só hora e
+ * minuto, sem fuso: no Railway saía em UTC, 3h à frente de <data_atual>, e uma
+ * execução de semanas atrás aparecia igual a uma de agora. A regra de
+ * deduplicação só consegue separar "hoje" de "outro dia" se a data estiver aqui.
+ *
+ * `arguments` é jsonb e chega como objeto, apesar do tipo `string` em IntentLog:
+ * o JSON.parse antigo quebrava e o bloco imprimia "[object Object]".
+ */
+export function formatIntentLogs(logs: IntentLogLinha[]): string {
+  if (!logs.length) return '(nenhuma ação executada nesta conversa ainda)';
+  return logs
+    .map((log) => {
+      const quando = new Date(log.created_at).toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const args = (() => {
+        const a = log.arguments ?? {};
+        if (typeof a !== 'string') return JSON.stringify(a);
+        try { return JSON.stringify(JSON.parse(a)); } catch { return a; }
+      })();
+      const status = log.success ? '✓' : '✗ falhou';
+      return `[${quando}] ${log.intent_key} | args: ${args} | ${status}`;
+    })
+    .join('\n');
+}
+
 export function buildExecutorPrompt(intentLogsText: string): string {
   const currentDate = getCurrentDateBR();
   return `# PAPEL
@@ -55,8 +97,15 @@ Antes de chamar QUALQUER intent ou tool (exceto CRM e TRANSFERÊNCIA), verifique
 ## Regra de deduplicação — não repita o que já foi feito
 Antes de chamar uma intent, consulte \`<acoes_executadas>\`.
 - Se a mesma intent já foi executada com sucesso com argumentos equivalentes nesta conversa → **não execute novamente**. Use o resultado anterior.
-- Isto vale com força total para as intents de **texto fixo** (as que não recebem argumento e mandam a mensagem direto ao cliente, como as \`enviar_detalhes_*\`): uma execução bem-sucedida nesta conversa já entregou o texto, e chamar de novo reenvia a mesma mensagem e irrita. Responda a pergunta seguinte com suas próprias palavras, a partir do que já foi dito.
+- Isto vale com força total para as intents de **texto fixo** (as que não recebem argumento e mandam a mensagem direto ao cliente, como as \`enviar_detalhes_*\`): uma execução bem-sucedida **hoje** já entregou o texto, e chamar de novo reenvia a mesma mensagem e irrita. Responda a pergunta seguinte com suas próprias palavras, a partir do que já foi dito.
+- "Hoje" é a data de \`<data_atual>\`. Texto fixo enviado em **outro dia** não conta: o cliente voltou depois e precisa do texto de novo, então acione.
 - Se foi executada mas falhou → pode tentar novamente se o contexto mudou.
+
+## Regra do texto fixo — só o assunto que foi pedido
+As intents de texto fixo mandam a mensagem **direto ao cliente**, sem passar pelo Orquestrador. Por isso:
+- Só acione uma delas quando o item dela estiver escrito na tarefa ou na mensagem do cliente.
+- Se a tarefa pede valor, agenda ou informação de um item que nenhuma intent de texto fixo cobre, use a intent de busca. Se nenhuma servir, devolva \`TAREFA_NAO_EXECUTADA\`.
+- **Nunca** acione o texto de outro assunto por falta de opção melhor. O cliente recebe na hora um texto que não tem nada a ver com a pergunta, e isso não tem como desfazer.
 
 # FERRAMENTAS DISPONÍVEIS
 - **Intents de negócio**: tools específicas do agente (ex: agendar_consulta, consultar_preco)
