@@ -157,6 +157,17 @@ describe('regras de texto fixo no manual do Executor', () => {
     expect(p).toContain('Nunca** acione o texto de outro assunto');
   });
 
+  it('manda o texto fixo do item mesmo quando a tarefa só pede preço', () => {
+    // 23/09/2026: "qual o valor da consulta do neuro" saiu só com preço. O
+    // Orquestrador escreveu a tarefa citando conferir_especialidades e o Executor
+    // seguiu ao pé da letra; o texto oficial de neurologia nunca saiu.
+    const p = buildExecutorPrompt(LOGS_A);
+    const regra = p.slice(p.indexOf('Regra do texto fixo'), p.indexOf('# FERRAMENTAS DISPONÍVEIS'));
+    expect(regra.length).toBeGreaterThan(0);
+    expect(regra).toContain('mesmo que a tarefa só fale em valor');
+    expect(regra).toContain('texto já ter saído hoje');
+  });
+
   it('as regras novas ficam no trecho cacheado, antes do conteúdo volátil', () => {
     const a = buildExecutorPrompt(LOGS_A);
     const b = buildExecutorPrompt(LOGS_B);
