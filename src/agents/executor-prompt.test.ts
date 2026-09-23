@@ -168,6 +168,18 @@ describe('regras de texto fixo no manual do Executor', () => {
     expect(regra).toContain('texto já ter saído hoje');
   });
 
+  it('depois do texto fixo, só busca se a intent de texto mandar', () => {
+    // 17-21/09/2026: o Executor mandava o texto de endoscopia (que já traz o preço) e ainda
+    // buscava "endoscopia" em conferir_especialidades, onde o item não existe. A busca
+    // voltava vazia e o Orquestrador transferia alegando busca vazia (4 de 9 casos). Teste
+    // do pezinho e paternidade são piores: a busca devolve o teste ergométrico.
+    const p = buildExecutorPrompt(LOGS_A);
+    const regra = p.slice(p.indexOf('Regra do texto fixo'), p.indexOf('# FERRAMENTAS DISPONÍVEIS'));
+    expect(regra).toContain('se a descrição daquela intent de texto mandar buscar');
+    expect(regra).toContain('não justifica transferência');
+    expect(regra).not.toContain('**e** faça a busca');
+  });
+
   it('as regras novas ficam no trecho cacheado, antes do conteúdo volátil', () => {
     const a = buildExecutorPrompt(LOGS_A);
     const b = buildExecutorPrompt(LOGS_B);
