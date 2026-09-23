@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildExecutorPrompt } from './executor-prompt';
+import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 
 /**
  * O cache de prompt da OpenAI casa PREFIXO EXATO e só entra em jogo a partir de
@@ -89,5 +89,79 @@ describe('prompt do Executor: o que é estável fica na frente', () => {
     const p = buildExecutorPrompt(LOGS_A);
     const regra = p.slice(p.indexOf('Regra de deduplicação'));
     expect(regra).toContain('<acoes_executadas>');
+  });
+});
+
+/**
+ * 23/09/2026, Duda (LP Saúde): duas falhas de texto fixo no mesmo dia.
+ *
+ * 1. A cliente perguntou o valor da USG obstétrica e recebeu o texto de
+ *    neuropediatria. O Orquestrador pediu a coisa certa; o Executor, sem intent
+ *    de texto para ultrassom, acionou a de outro assunto (exec n8n 287029).
+ * 2. Texto de mamografia e de endoscopia saiu duas vezes seguidas para o mesmo
+ *    cliente. A regra de deduplicação mandava olhar <acoes_executadas>, mas o
+ *    bloco mostrava só a hora, sem data e em UTC.
+ */
+describe('<acoes_executadas>: data, fuso e argumentos', () => {
+  it('mostra data e hora no fuso de <data_atual>, não em UTC', () => {
+    // 17:10 UTC = 14:10 em São Paulo
+    const s = formatIntentLogs([
+      { intent_key: 'enviar_detalhes_mamografia', arguments: {}, success: true, created_at: '2026-09-23T17:10:00Z' },
+    ]);
+    expect(s).toContain('23/09/2026');
+    expect(s).toContain('14:10');
+    expect(s).not.toContain('17:10');
+  });
+
+  it('separa execução de outro dia da de hoje', () => {
+    const s = formatIntentLogs([
+      { intent_key: 'enviar_detalhes_neurologia', arguments: {}, success: true, created_at: '2026-06-21T13:47:00Z' },
+      { intent_key: 'enviar_detalhes_neurologia', arguments: {}, success: true, created_at: '2026-09-23T13:47:00Z' },
+    ]).split('\n');
+    expect(s[0]).toContain('21/06/2026');
+    expect(s[1]).toContain('23/09/2026');
+  });
+
+  it('arguments em objeto (jsonb) sai como JSON, não "[object Object]"', () => {
+    const s = formatIntentLogs([
+      { intent_key: 'conferir_especialidades', arguments: { terms: 'neurologista' }, success: true, created_at: '2026-09-23T14:07:00Z' },
+    ]);
+    expect(s).toContain('{"terms":"neurologista"}');
+    expect(s).not.toContain('[object Object]');
+  });
+
+  it('arguments em string JSON continua funcionando', () => {
+    const s = formatIntentLogs([
+      { intent_key: 'x', arguments: '{"a":1}', success: false, created_at: '2026-09-23T14:07:00Z' },
+    ]);
+    expect(s).toContain('{"a":1}');
+    expect(s).toContain('✗ falhou');
+  });
+
+  it('sem logs devolve o aviso de conversa sem ação', () => {
+    expect(formatIntentLogs([])).toBe('(nenhuma ação executada nesta conversa ainda)');
+  });
+});
+
+describe('regras de texto fixo no manual do Executor', () => {
+  it('a dedup de texto fixo vale só para hoje', () => {
+    const p = buildExecutorPrompt(LOGS_A);
+    const regra = p.slice(p.indexOf('Regra de deduplicação'), p.indexOf('# FERRAMENTAS DISPONÍVEIS'));
+    expect(regra).toContain('**hoje**');
+    expect(regra).toContain('outro dia');
+  });
+
+  it('proíbe acionar texto fixo de outro assunto', () => {
+    const p = buildExecutorPrompt(LOGS_A);
+    expect(p).toContain('Regra do texto fixo');
+    expect(p).toContain('Nunca** acione o texto de outro assunto');
+  });
+
+  it('as regras novas ficam no trecho cacheado, antes do conteúdo volátil', () => {
+    const a = buildExecutorPrompt(LOGS_A);
+    const b = buildExecutorPrompt(LOGS_B);
+    const comum = a.slice(0, prefixoComum(a, b));
+    expect(comum).toContain('Regra do texto fixo');
+    expect(comum).toContain('outro dia');
   });
 });

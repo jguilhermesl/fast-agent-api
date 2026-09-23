@@ -15,7 +15,7 @@ import {
   combineTools
 } from '../tools/definitions';
 import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
-import { buildExecutorPrompt } from './executor-prompt';
+import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
 
 /**
@@ -31,27 +31,8 @@ const openai = new OpenAI({ apiKey: config.openaiApiKey, timeout: 60_000, maxRet
 
 const MAX_TOOL_ROUNDS = 8;
 
-// ── Formata logs de execuções anteriores ─────────────────────
-
-function formatIntentLogs(logs: Awaited<ReturnType<typeof getIntentLogs>>): string {
-  if (!logs.length) return '(nenhuma ação executada nesta conversa ainda)';
-  return logs
-    .map((log) => {
-      const hora = new Date(log.created_at).toLocaleTimeString('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-      const args = (() => {
-        try { return JSON.stringify(JSON.parse(log.arguments ?? '{}')); }
-        catch { return log.arguments ?? '{}'; }
-      })();
-      const status = log.success ? '✓' : '✗ falhou';
-      return `[${hora}] ${log.intent_key} | args: ${args} | ${status}`;
-    })
-    .join('\n');
-}
-
 // ── System prompt do Executor ─────────────────────────────────
+// `formatIntentLogs` mora em executor-prompt.ts, junto do prompt, para ter teste.
 
 
 // ── Executor Agent (OpenAI tool calling loop) ─────────────────
