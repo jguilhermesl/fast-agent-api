@@ -162,6 +162,7 @@ Máximo de 3 a 6 palavras. Extraia termos-chave do contexto — não use frases 
 - **Nunca invente argumentos** — se o dado não está no contexto ou histórico, não execute a intent
 - **Nunca repita intents** que já foram executadas com sucesso com os mesmos argumentos
 - Use agent_knowledge_base no máximo 2x por execução
+- **Pergunta sobre o que um item inclui, cobre ou exige** ("o exame está incluso?", "tem retorno?", "precisa de requisição?"): busque o item de novo e responda pelo \`nome\`, \`detalhe\` e \`informacoes\` que voltarem. Nunca responda "não há confirmação" a partir do histórico: falta de menção não é resposta.
 - Toda tool responde no envelope {status, http_status, data, query_echo, hint}. Leia o \`status\` ANTES do \`data\`.
   - status="ok"    → use \`data\` normalmente.
   - status="empty" → a busca não achou nada. Reporte ao Orquestrador: \`BUSCA_VAZIA: <query_echo>\`.
@@ -189,6 +190,8 @@ Você DEVE retornar um texto estruturado e legível com TODAS as informações i
 - ✅ Use quebras de linha e formatação para facilitar leitura
 - ✅ Se a intent retornou uma lista de itens, inclua TODOS os itens formatados
 - ✅ Se a intent retornou preços, datas, horários, inclua TODOS eles formatados
+- ✅ Copie o \`nome\` de cada item **exatamente como veio, inteiro**. Não encurte e não troque por um rótulo seu: o nome às vezes diz o que está incluso. Ex.: "Cardiologista/Cardiologia (Eletrocardiograma + Parecer Cardiológico + Consulta + Retorno 15 dias)" virou "CONSULTA — CARDIOLOGISTA", e o cliente ouviu que o exame não estava incluso.
+- ✅ Copie \`detalhe\` e \`informacoes\` **literalmente**, sem resumir. É ali que a clínica escreve regra do item (idade, quem atende, o que inclui).
 
 ## Estrutura do retorno
 Organize o retorno em blocos claros, um para cada tarefa processada:

@@ -188,3 +188,21 @@ describe('regras de texto fixo no manual do Executor', () => {
     expect(comum).toContain('outro dia');
   });
 });
+
+// 24/09/2026, lead d6f3374f: o Executor encurtou o nome do item de cardiologia e,
+// no turno seguinte, respondeu "não há confirmação de que o exame esteja incluído"
+// sem buscar de novo. O Orquestrador disse ao cliente que o exame não estava incluso.
+describe('buildExecutorPrompt — fidelidade ao dado da busca', () => {
+  const prompt = buildExecutorPrompt('');
+  it('manda copiar o nome do item inteiro, com o exemplo real', () => {
+    expect(prompt).toContain('exatamente como veio, inteiro');
+    expect(prompt).toContain('Eletrocardiograma + Parecer Cardiológico + Consulta + Retorno 15 dias');
+  });
+  it('manda copiar detalhe e informacoes literalmente', () => {
+    expect(prompt).toMatch(/detalhe`\s+e\s+`informacoes`\s+\*\*literalmente\*\*/);
+  });
+  it('pergunta do que está incluso exige nova busca, não histórico', () => {
+    expect(prompt).toContain('busque o item de novo');
+    expect(prompt).toContain('falta de menção não é resposta');
+  });
+});
