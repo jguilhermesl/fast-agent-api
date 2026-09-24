@@ -1,7 +1,9 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
-import { getHistory, appendHistory } from '../memory/redis';
+import { getHistory, appendHistory, lockStore, getUltimoTurno, setUltimoTurno } from '../memory/redis';
+import { entrarNaFila, sairDaFila, TURN_LOCK_WAIT_MS, type Vez } from '../memory/fila';
+import { detectarCruzamento, comNotaDeCruzamento, type MotivoCruzamento } from './cruzamento';
 import {
   saveTokenUsage,
   buildTokenLogEntry,
@@ -10,6 +12,7 @@ import {
   getIntentLogsCompletos,
   conversaTemCompromissoCriado,
   logGuardShadow,
+  getMensagensDoCliente,
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
@@ -18,7 +21,7 @@ import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
-import { createDeadline, capTimeout, DeadlineExceededError, type Deadline } from '../services/deadline';
+import { createDeadline, capTimeout, DeadlineExceededError, TURN_BUDGET_MS, type Deadline } from '../services/deadline';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
 
 /**
@@ -92,7 +95,13 @@ Responda SOMENTE com JSON válido no formato abaixo. Nenhum texto fora do JSON.
 // ── Formata mensagem do cliente conforme o tipo ───────────────
 // Garante que o LLM entenda que análises de imagem/áudio não são textos digitados pelo cliente.
 
-function formatClientMessage(content: string, type?: string): string {
+// `nota`: o cliente escreveu antes de receber a resposta anterior (agents/cruzamento.ts).
+function formatClientMessage(content: string, type?: string, nota = false): string {
+  const formatado = formatarPorTipo(content, type);
+  return nota ? comNotaDeCruzamento(formatado) : formatado;
+}
+
+function formatarPorTipo(content: string, type?: string): string {
   switch (type) {
     case 'image_analysis':
       return `[O cliente enviou uma imagem. A descrição abaixo foi gerada automaticamente — não é texto digitado pelo cliente.]\n\n${content}`;
@@ -163,11 +172,11 @@ interface ProviderResult {
 }
 
 // ── OpenAI Orchestrator ───────────────────────────────────────
-async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Deadline): Promise<ProviderResult> {
+async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false): Promise<ProviderResult> {
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
-  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type);
+  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: req.system_prompt + OUTPUT_SCHEMA_SUFFIX },
@@ -248,11 +257,11 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
 
 // ── Anthropic Orchestrator ────────────────────────────────────
 
-async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: Deadline): Promise<ProviderResult> {
+async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false): Promise<ProviderResult> {
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
-  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type);
+  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota);
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
@@ -361,20 +370,61 @@ function mergeExecutorTraces(traces: ExecutorTrace[]): ExecutorTrace {
 
 export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   const scopedClientId = `${req.agent_id}:${req.contact_phone}`;
-  const history = await getHistory(scopedClientId, 18);
 
   // Orçamento único do turno, criado aqui — na entrada do request — e
   // propagado pro Executor e pelas tools (services/deadline.ts). Sem isto, só
   // existia teto de RODADAS em cada nível, nunca teto de RELÓGIO agregado.
+  // Criado ANTES da fila: a espera pelo turno anterior sai do mesmo teto, então
+  // o n8n nunca espera mais do que já esperava.
   const deadline = createDeadline();
+  const inicio = Date.now();
+
+  // Um turno por conversa de cada vez (memory/fila.ts): o 2º só lê o histórico
+  // depois que o 1º gravou. TTL acima do turno mais longo possível.
+  const vez = await entrarNaFila(lockStore, scopedClientId, {
+    ttlMs: TURN_BUDGET_MS + 30_000,
+    esperaMaxMs: TURN_LOCK_WAIT_MS,
+  });
+  if (vez.concorrente) {
+    console.log(`[Fila] conversation=${req.conversation_id} esperou ${vez.esperouMs}ms pelo turno anterior${vez.token ? '' : ' (seguiu sem lock)'}`);
+  }
+
+  try {
+    return await runTurno(req, scopedClientId, deadline, vez);
+  } finally {
+    // Juntos, na mesma conexão: o SET sai antes do EVAL e o Redis executa em
+    // ordem, então quem pegar o lock em seguida já lê o registro novo.
+    await Promise.all([
+      setUltimoTurno(scopedClientId, { inicio, fim: Date.now() }),
+      sairDaFila(lockStore, scopedClientId, vez),
+    ]);
+  }
+}
+
+async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Deadline, vez: Vez): Promise<ChatResponse> {
+  // Cruzamento (agents/cruzamento.ts) em paralelo com o histórico: só vai ao
+  // Supabase quando o turno anterior acabou há até 45 s.
+  const [history, cruzamento] = await Promise.all([
+    getHistory(scopedClientId, 18),
+    config.cruzamentoMode === 'off'
+      ? Promise.resolve<MotivoCruzamento | null>(null)
+      : detectarCruzamento(
+          { getUltimoTurno, getMensagensDoCliente },
+          { scopedClientId, conversationId: req.conversation_id, esperouNaFila: vez.concorrente },
+        ),
+  ]);
+  const nota = cruzamento !== null && config.cruzamentoMode === 'nota';
+  if (cruzamento) {
+    console.log(`[Cruzamento] conversation=${req.conversation_id} motivo=${cruzamento} modo=${config.cruzamentoMode}`);
+  }
 
   let result: ProviderResult | null = null;
   let providerUsed = req.model_provider;
 
   try {
     switch (req.model_provider) {
-      case 'openai':    result = await runOpenAI(req, history, deadline);    break;
-      case 'anthropic': result = await runAnthropic(req, history, deadline); break;
+      case 'openai':    result = await runOpenAI(req, history, deadline, nota);    break;
+      case 'anthropic': result = await runAnthropic(req, history, deadline, nota); break;
       /**
        * Provedor fora dos dois implementados.
        *
@@ -418,7 +468,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
       try {
         console.log('[Orchestrator] Trying OpenAI fallback...');
         providerUsed = 'openai';
-        result = await runOpenAI({ ...req, model_name: 'gpt-4.1-mini' }, history, deadline);
+        result = await runOpenAI({ ...req, model_name: 'gpt-4.1-mini' }, history, deadline, nota);
       } catch (fallbackErr) {
         const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         await logError({
@@ -594,6 +644,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
       cost_usd: costUsd,
     },
     executor: result.executorTrace,
+    turno: { esperou_fila_ms: vez.esperouMs, cruzamento, nota_cruzamento: nota },
     communication: result.communications.length > 0 ? result.communications : undefined,
   };
 

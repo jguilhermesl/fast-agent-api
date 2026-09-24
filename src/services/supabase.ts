@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { config } from '../config';
 import type { AgentIntent, IntentLog, TokenLogEntry } from '../types';
+import type { MensagemDoCliente } from '../agents/cruzamento';
 
 // Cliente service_role para operações privilegiadas
 export const supabase = createClient(config.supabaseUrl, config.supabaseServiceKey);
@@ -109,6 +110,33 @@ export async function getIntentLogsCompletos(
     return [];
   }
   return (data ?? []).reverse();
+}
+
+// ── Falas do cliente (detecção de cruzamento) ─────────────────
+
+/**
+ * Mensagens do cliente (inbound) da conversa com `created_at` no intervalo.
+ * Usada só por agents/cruzamento.ts, e só quando o turno anterior terminou há
+ * até 45 s. Anda no índice `idx_messages_conv_created`. Erro vira
+ * exceção: quem chama trata como "sem cruzamento" (fail-open).
+ */
+export async function getMensagensDoCliente(
+  conversationId: string,
+  desdeIso: string,
+  ateIso: string
+): Promise<MensagemDoCliente[]> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('created_at, message_type, content')
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'inbound')
+    .gte('created_at', desdeIso)
+    .lte('created_at', ateIso)
+    .order('created_at', { ascending: true })
+    .limit(20);
+
+  if (error) throw new Error(`getMensagensDoCliente: ${error.message}`);
+  return data ?? [];
 }
 
 // ── Token tracking ────────────────────────────────────────────
