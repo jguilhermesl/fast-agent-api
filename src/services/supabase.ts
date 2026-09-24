@@ -26,7 +26,11 @@ export async function getAgentIntents(agentId: string): Promise<AgentIntent[] | 
   const { data, error } = await supabase
     .from('agent_intents')
     .select('id, slug, trigger_description, request_schema')
-    .eq('agent_id', agentId);
+    .eq('agent_id', agentId)
+    // Intenção desligada no painel não pode virar ferramenta do Executor: antes ela
+    // chegava como tool e o gatilho precisava pedir "NAO USE" (Duda: mamografia com
+    // slug errado e proctologista, as duas com 404 no n8n).
+    .eq('status', 'active');
 
   if (error) {
     console.error('[Supabase] getAgentIntents error:', error.message);
