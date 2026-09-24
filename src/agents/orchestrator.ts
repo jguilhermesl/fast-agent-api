@@ -4,6 +4,7 @@ import { config } from '../config';
 import { getHistory, appendHistory, lockStore, getUltimoTurno, setUltimoTurno } from '../memory/redis';
 import { entrarNaFila, sairDaFila, TURN_LOCK_WAIT_MS, type Vez } from '../memory/fila';
 import { detectarCruzamento, comNotaDeCruzamento, type MotivoCruzamento } from './cruzamento';
+import { cumprimentoDeveCalar } from './saudacao-espera';
 import {
   saveTokenUsage,
   buildTokenLogEntry,
@@ -390,7 +391,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   }
 
   try {
-    return await runTurno(req, scopedClientId, deadline, vez);
+    return await runTurno(req, scopedClientId, deadline, vez, inicio);
   } finally {
     // Juntos, na mesma conexão: o SET sai antes do EVAL e o Redis executa em
     // ordem, então quem pegar o lock em seguida já lê o registro novo.
@@ -401,7 +402,20 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   }
 }
 
-async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Deadline, vez: Vez): Promise<ChatResponse> {
+async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Deadline, vez: Vez, inicio: number): Promise<ChatResponse> {
+  // Cumprimento sozinho com a pergunta já na conversa (agents/saudacao-espera.ts):
+  // cala, e o turno da pergunta responde tudo. Roda dentro da fila da conversa.
+  if (req.client_message_type === 'text' && isGreetingOrFarewell(req.client_messages)) {
+    const calar = await cumprimentoDeveCalar(
+      { getMensagensDoCliente, esperar: (ms) => new Promise((r) => setTimeout(r, capTimeout(ms, deadline))) },
+      { conversationId: req.conversation_id, inicioTurno: inicio, clientMessages: req.client_messages },
+    );
+    if (calar) {
+      console.log(`[Saudação] conversation=${req.conversation_id} cumprimento calado: há fala do cliente fora deste turno`);
+      return { ...makeFallback([]), mensagens: [], redirect_human: false, transfer_reason: undefined };
+    }
+  }
+
   // Cruzamento (agents/cruzamento.ts) em paralelo com o histórico: só vai ao
   // Supabase quando o turno anterior acabou há até 45 s.
   const [history, cruzamento] = await Promise.all([

@@ -191,7 +191,7 @@ Você DEVE retornar um texto estruturado e legível com TODAS as informações i
 - ✅ Se a intent retornou uma lista de itens, inclua TODOS os itens formatados
 - ✅ Se a intent retornou preços, datas, horários, inclua TODOS eles formatados
 - ✅ Copie o \`nome\` de cada item **exatamente como veio, inteiro**. Não encurte e não troque por um rótulo seu: o nome às vezes diz o que está incluso. Ex.: "Cardiologista/Cardiologia (Eletrocardiograma + Parecer Cardiológico + Consulta + Retorno 15 dias)" virou "CONSULTA — CARDIOLOGISTA", e o cliente ouviu que o exame não estava incluso.
-- ✅ Copie \`detalhe\` e \`informacoes\` **literalmente**, sem resumir. É ali que a clínica escreve regra do item (idade, quem atende, o que inclui).
+- ✅ Copie \`detalhe\` e \`informacoes\` **literalmente**, sem resumir. É ali que a clínica escreve regra do item (idade, quem atende, o que inclui). Se a disponibilidade trouxer \`informacoesProfissional\`, copie junto do nome daquele profissional: é a idade que ele atende, a formação, o RQE.
 
 ## Estrutura do retorno
 Organize o retorno em blocos claros, um para cada tarefa processada:
