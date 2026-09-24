@@ -401,15 +401,66 @@ const KB_MIN_SIMILARITY = 0.30;
 // que isso já vira mais de um chunk na origem.
 const KB_MAX_CHUNK_CHARS = 6000;
 
+/**
+ * Ajuste da busca por agente, em `agents.prompt_config.kb`:
+ *   { "min_similarity": 0.45, "excluir_injetados": true }
+ * Sem a chave, vale o comportamento global de antes (0,30, tudo entra).
+ *
+ * Por que por agente: na Duda (24/09/2026, 341 chamadas reais) 81% das buscas
+ * traziam algum Preparo sem relação com a pergunta, e a Objeções — que já vai no
+ * prompt em todo turno — voltava de novo 71 vezes por semana. Nos outros agentes
+ * quase todo treinamento é `always` e o Executor, que não vê o prompt, depende
+ * da busca para lê-los: excluir os injetados para todos quebraria esses agentes.
+ */
+export interface KbOpcoes {
+  minSimilarity?: number;
+  /** ids de treinamentos que já entram no prompt (injection_mode ≠ ondemand) */
+  excluirIds?: Set<string>;
+}
+
+const KB_OPCOES_TTL_MS = 5 * 60_000;
+const kbOpcoesCache = new Map<string, { em: number; opcoes: KbOpcoes }>();
+
+export async function getKbOpcoes(agentId: string): Promise<KbOpcoes> {
+  const cache = kbOpcoesCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.opcoes;
+  const opcoes: KbOpcoes = {};
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    const kb = (ag?.prompt_config as { kb?: { min_similarity?: unknown; excluir_injetados?: unknown } } | null)?.kb;
+    if (typeof kb?.min_similarity === 'number' && kb.min_similarity > 0 && kb.min_similarity < 1) {
+      opcoes.minSimilarity = kb.min_similarity;
+    }
+    if (kb?.excluir_injetados === true) {
+      const { data: docs } = await supabase
+        .from('agent_trainings')
+        .select('id, injection_mode')
+        .eq('agent_id', agentId)
+        .eq('status', 'active');
+      opcoes.excluirIds = new Set(
+        (docs ?? []).filter((d: { injection_mode: string | null }) => d.injection_mode !== 'ondemand').map((d: { id: string }) => d.id),
+      );
+    }
+  } catch (err) {
+    console.error('[KB] opções do agente não lidas, vale o padrão:', err instanceof Error ? err.message : String(err));
+  }
+  kbOpcoesCache.set(agentId, { em: Date.now(), opcoes });
+  return opcoes;
+}
+
 export async function searchKnowledgeBase(
   agentId: string,
   queryEmbedding: number[],
   limit = KB_MATCH_COUNT,
+  opcoes: KbOpcoes = {},
 ): Promise<string> {
+  const minimo = opcoes.minSimilarity ?? KB_MIN_SIMILARITY;
+  const excluir = opcoes.excluirIds ?? new Set<string>();
   const { data, error } = await supabase.rpc('match_documents', {
     query_embedding: queryEmbedding,
     filter: { agent_id: agentId },
-    match_count: limit,
+    // pede a mais o que pode ser excluído, para os `limit` que sobram serem os melhores
+    match_count: limit + excluir.size,
   });
 
   if (error) {
@@ -417,7 +468,7 @@ export async function searchKnowledgeBase(
     return '(base de conhecimento indisponível no momento)';
   }
 
-  const docs = (data ?? []) as Array<{ content: string; similarity: number; metadata?: Record<string, unknown> }>;
+  const docs = (data ?? []) as Array<{ id?: string; content: string; similarity: number; metadata?: Record<string, unknown> }>;
 
   // Log para debug — mostra scores e metadados de cada chunk retornado
   console.log(`[KB] query retornou ${docs.length} chunks para agent_id=${agentId}:`);
@@ -426,10 +477,12 @@ export async function searchKnowledgeBase(
     console.log(`  [${i + 1}] similarity=${d.similarity.toFixed(4)} | metadata=${JSON.stringify(d.metadata ?? {})} | "${preview}..."`);
   });
 
-  // Filtra por similaridade mínima para evitar ruído fora de contexto
-  const relevant = docs.filter((d) => d.similarity >= KB_MIN_SIMILARITY);
+  // Filtra por similaridade mínima e tira o que já está no prompt do agente
+  const relevant = docs
+    .filter((d) => d.similarity >= minimo && !(d.id && excluir.has(d.id)))
+    .slice(0, limit);
 
-  console.log(`[KB] após filtro (>=${KB_MIN_SIMILARITY}): ${relevant.length} chunks aprovados`);
+  console.log(`[KB] após filtro (>=${minimo}${excluir.size ? `, sem ${excluir.size} injetado(s)` : ''}): ${relevant.length} chunks aprovados`);
 
   if (relevant.length === 0) {
     return '(nenhuma informação relevante encontrada na base de conhecimento)';

@@ -72,3 +72,32 @@ describe('searchKnowledgeBase — limiar de similaridade', () => {
     expect(resultado).toBe('(nenhuma informação relevante encontrada na base de conhecimento)');
   });
 });
+
+// 24/09/2026, Duda: corte e exclusão por agente (prompt_config.kb). Números da auditoria de
+// dados: o PSA pedido de verdade tirou 0,50–0,57; Preparo sem relação com a pergunta ficava
+// entre 0,30 e 0,45.
+describe('searchKnowledgeBase — opções por agente', () => {
+  beforeEach(() => rpcMock.mockReset());
+  const chunk = (id: string, similarity: number, content = `texto ${id}`) => ({ id, content, similarity, metadata: { agent_id: 'agent-1' } });
+
+  it('sem opções, vale o corte global de sempre (0,30)', async () => {
+    rpcMock.mockResolvedValue({ data: [chunk('a', 0.36)], error: null });
+    expect(await searchKnowledgeBase('agent-1', [0.1])).toContain('texto a');
+  });
+
+  it('corte do agente em 0,45 derruba o Preparo de passagem e mantém o PSA pedido', async () => {
+    rpcMock.mockResolvedValue({ data: [chunk('psa', 0.52, 'Preparo do PSA'), chunk('cultura', 0.38, 'Preparo da cultura')], error: null });
+    const r = await searchKnowledgeBase('agent-1', [0.1], 3, { minSimilarity: 0.45 });
+    expect(r).toContain('Preparo do PSA');
+    expect(r).not.toContain('Preparo da cultura');
+  });
+
+  it('exclui o treinamento que já vai no prompt e pede a mais para completar o limite', async () => {
+    rpcMock.mockResolvedValue({ data: [chunk('objecoes', 0.6, 'OBJEÇÃO'), chunk('b', 0.5), chunk('c', 0.49), chunk('d', 0.48)], error: null });
+    const r = await searchKnowledgeBase('agent-1', [0.1], 3, { excluirIds: new Set(['objecoes']) });
+    expect(rpcMock.mock.calls[0][1].match_count).toBe(4);
+    expect(r).not.toContain('OBJEÇÃO');
+    expect(r).toContain('texto b');
+    expect(r).toContain('texto d');
+  });
+});
