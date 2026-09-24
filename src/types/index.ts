@@ -52,6 +52,12 @@ export interface ExecutionLogs {
     cost_usd: number;
   };
   executor: ExecutorTrace;
+  /** Fila e cruzamento (memory/fila.ts, agents/cruzamento.ts); vai para interaction_logs. */
+  turno?: {
+    esperou_fila_ms: number;
+    cruzamento: 'fila' | 'tempo' | null;
+    nota_cruzamento: boolean;
+  };
   communication?: Array<{
     query: string;
     result: string;
