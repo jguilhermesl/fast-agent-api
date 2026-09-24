@@ -1,7 +1,7 @@
 import axios from 'axios';
 import OpenAI from 'openai';
 import { config } from '../config';
-import { searchKnowledgeBase } from '../services/supabase';
+import { searchKnowledgeBase, getKbOpcoes } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
 import { wrap, wrapError } from './envelope';
 import type { ExecutorInput } from '../types';
@@ -179,7 +179,7 @@ export async function handleKnowledgeBase(
     const embedding = embeddingResponse.data[0].embedding;
 
     // Busca no Supabase Vector Store
-    const result = await searchKnowledgeBase(ctx.agent_id, embedding);
+    const result = await searchKnowledgeBase(ctx.agent_id, embedding, undefined, await getKbOpcoes(ctx.agent_id));
     // A KB devolve TEXTO, não JSON: as duas frases abaixo são o "não achei" dela.
     // Sem traduzir para status='empty', o modelo lia a frase como conteúdo.
     const vazio =
