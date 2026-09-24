@@ -16,6 +16,7 @@ import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
+import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, type Deadline } from '../services/deadline';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
@@ -144,113 +145,6 @@ function makeFallback(history: ChatMessage[], logs?: Partial<ExecutionLogs>): Ch
       executor: EMPTY_EXECUTOR_TRACE,
       ...logs,
     },
-  };
-}
-
-// ── Parse do output do Orquestrador ──────────────────────────
-
-type ParsedOutput = { mensagens: string[]; redirect_human: boolean; transfer_reason?: string };
-
-// Uma string do array `mensagens` que ainda tem cara de JSON é JSON duplo-codificado:
-// o parse externo teve sucesso e o objeto interno ia limpo para o cliente. Foi o
-// vazamento de 08 e 10/08/2026 ("(*mensagens*:[*Perfeito, ...").
-function pareceJson(s: string): boolean {
-  const t = s.trim();
-  return (
-    /"(mensagens|mensagem|redirect_human|transfer_reason)"\s*:/.test(t) ||
-    (t.startsWith('{') && t.endsWith('}') && /"[^"]+"\s*:/.test(t))
-  );
-}
-
-function extrairReason(raw: string): string | undefined {
-  const m = raw.match(/"transfer_reason"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  return m?.[1]?.trim() || undefined;
-}
-
-function normalizeparsed(parsed: Record<string, unknown>): ParsedOutput | null {
-  const redirect = Boolean(parsed.redirect_human ?? false);
-  const reason   = redirect && typeof parsed.transfer_reason === 'string' && parsed.transfer_reason.trim()
-    ? parsed.transfer_reason.trim()
-    : undefined;
-
-  // { mensagens: string[] }
-  if (Array.isArray(parsed.mensagens)) {
-    const mensagens = parsed.mensagens.map(String).filter((m) => m.trim() !== '' && !pareceJson(m));
-    // Sobrou nada depois de filtrar: cai no fallback em vez de responder vazio.
-    if (mensagens.length === 0) return null;
-    return { mensagens, redirect_human: redirect, transfer_reason: reason };
-  }
-
-  // { mensagens: string }
-  if (typeof parsed.mensagens === 'string' && parsed.mensagens.trim()) {
-    return { mensagens: [parsed.mensagens.trim()], redirect_human: redirect, transfer_reason: reason };
-  }
-
-  // { mensagem: string }
-  if (typeof parsed.mensagem === 'string' && parsed.mensagem.trim()) {
-    return { mensagens: [parsed.mensagem.trim()], redirect_human: redirect, transfer_reason: reason };
-  }
-
-  return null;
-}
-
-function parseOrchestratorOutput(raw: string): ParsedOutput {
-  const fallbackMsg = 'Desculpe, estou com uma instabilidade no momento. Pode tentar novamente em instantes? 🙏';
-
-  try {
-    const parsed = JSON.parse(raw);
-    const result = normalizeparsed(parsed);
-    if (result) return result;
-  } catch {}
-
-  try {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      const result = normalizeparsed(parsed);
-      if (result) return result;
-    }
-  } catch {}
-
-  // JSON malformado: resgata os textos do array "mensagens" antes de desistir.
-  const bloco = raw.match(/"mensagens"\s*:\s*\[([\s\S]*?)\]/);
-  if (bloco) {
-    const textos = [...bloco[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)]
-      .map((m) => m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim())
-      .filter((t) => t !== '');
-    if (textos.length) {
-      // `transfer_reason` caía no chão aqui: o pedido de humano chegava sem motivo.
-      const red = /"redirect_human"\s*:\s*true/.test(raw);
-      return {
-        mensagens: textos,
-        redirect_human: red,
-        transfer_reason: red ? extrairReason(raw) : undefined,
-      };
-    }
-  }
-
-  const text = raw.trim();
-
-  // Se ainda parece JSON, não pode ir para o cliente. Um texto legítimo pode
-  // começar com "{" ou "[" (ex.: "[IMPORTANTE] chegue 15 min antes"), então só
-  // barra o que tem cara de objeto de saída: campo conhecido, ou objeto fechado
-  // com par "chave": valor.
-  const temCampoConhecido = /"(mensagens|mensagem|redirect_human|transfer_reason)"\s*:/.test(text);
-  const objetoFechado = text.startsWith('{') && text.endsWith('}') && /"[^"]+"\s*:/.test(text);
-  if (!text || temCampoConhecido || objetoFechado) {
-    console.error('[Orchestrator] Saída não parseável:', text.slice(0, 500));
-    // Saída ilegível é falha nossa, não "está tudo bem". Antes devolvia
-    // redirect_human:false hardcoded e um pedido genuíno de humano sumia.
-    return {
-      mensagens: [fallbackMsg],
-      redirect_human: true,
-      transfer_reason: extrairReason(raw) ?? 'Saída do modelo não parseável',
-    };
-  }
-
-  return {
-    mensagens: [text],
-    redirect_human: false,
   };
 }
 
@@ -570,7 +464,7 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
   const pctCache = result.tokensIn > 0 ? Math.round((result.tokensCached / result.tokensIn) * 100) : 0;
   console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} cached=${result.tokensCached} (${pctCache}%) executorCalled=${result.executorTrace.called}`);
 
-  let parsed = parseOrchestratorOutput(result.output);
+  let parsed = parseOrchestratorOutput(result.output, entregouAoCliente(result.executorTrace.tools_called));
 
   // ── Guard de grounding (src/agents/guard.ts) ──────────────────
   // Duas checagens determinísticas, sem LLM e sem rede. Em `shadow` (padrão) só
