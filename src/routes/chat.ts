@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { runOrchestrator } from '../agents/orchestrator';
+import { limparEventosDoProvedor } from '../agents/entrada';
 
 export const chatRouter = Router();
 
@@ -50,6 +51,16 @@ chatRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
   const start = Date.now();
 
   console.log(`[Chat] → agent=${data.agent_id} conversation=${data.conversation_id} provider=${data.model_provider}/${data.model_name}`);
+
+  // Evento do provedor (mensagem editada/apagada) chega como texto. Sem fala do
+  // cliente, não há o que responder: `mensagens: []` faz o n8n não enviar nada.
+  const falaDoCliente = limparEventosDoProvedor(data.client_messages);
+  if (!falaDoCliente) {
+    console.log(`[Chat] ← ignorado: só evento do provedor (${JSON.stringify(data.client_messages.slice(0, 80))})`);
+    res.json({ mensagens: [], redirect_human: false });
+    return;
+  }
+  data.client_messages = falaDoCliente;
 
   try {
     const response = await runOrchestrator(data);
