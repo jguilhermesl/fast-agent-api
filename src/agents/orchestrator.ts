@@ -14,6 +14,7 @@ import {
   conversaTemCompromissoCriado,
   logGuardShadow,
   getMensagensDoCliente,
+  getEstiloResposta,
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
@@ -21,6 +22,7 @@ import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel, MENSAGE
 import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
+import { sufixoDeSaida } from './formato-saida';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, TURN_BUDGET_MS, type Deadline } from '../services/deadline';
@@ -60,26 +62,9 @@ const MAX_TOOL_ROUNDS = 5;
 
 // ── Schema de output injetado no system_prompt ────────────────
 // Garante que o modelo saiba exatamente o formato esperado,
-// independente do que o n8n colocar no system_prompt.
-const OUTPUT_SCHEMA_SUFFIX = `
-
----
-
-# FORMATO DE RESPOSTA — OBRIGATÓRIO
-Responda SOMENTE com JSON válido no formato abaixo. Nenhum texto fora do JSON.
-
-\`\`\`json
-{
-  "mensagens": ["mensagem 1", "mensagem 2"],
-  "redirect_human": false,
-  "transfer_reason": null
-}
-\`\`\`
-
-- **mensagens**: array de strings. Quebre em múltiplas mensagens curtas quando fizer sentido para WhatsApp. Nunca retorne um array vazio.
-- **redirect_human**: \`true\` apenas se precisar transferir para humano, caso contrário \`false\`.
-- **transfer_reason**: quando \`redirect_human\` for \`true\`, preencha com o motivo da transferência em uma frase curta (ex: "Cliente solicitou atendimento humano", "Dúvida sobre contrato fora do escopo"). Quando \`false\`, use \`null\`.
-- **Proibido**: nunca termine mensagens com frases genéricas de encerramento como "Se precisar de mais alguma coisa, é só avisar!", "Fico à disposição!", "Qualquer dúvida estou aqui!" ou similares. Encerre de forma natural e direta, sem filler.`;
+// independente do que o n8n colocar no system_prompt. O texto mora em
+// `./formato-saida.ts` (função pura, com teste) e muda com o `response_style` do
+// agente: no `conciso` não manda mais "quebre em múltiplas mensagens".
 
 // ── Formata mensagem do cliente conforme o tipo ───────────────
 // Garante que o LLM entenda que análises de imagem/áudio não são textos digitados pelo cliente.
@@ -160,14 +145,14 @@ interface ProviderResult {
 }
 
 // ── OpenAI Orchestrator ───────────────────────────────────────
-async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false): Promise<ProviderResult> {
+async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false, estilo: string | null = null): Promise<ProviderResult> {
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
   const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: req.system_prompt + OUTPUT_SCHEMA_SUFFIX },
+    { role: 'system', content: req.system_prompt + sufixoDeSaida(estilo) },
     ...history.map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.tools?.length
@@ -245,7 +230,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
 
 // ── Anthropic Orchestrator ────────────────────────────────────
 
-async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false): Promise<ProviderResult> {
+async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false, estilo: string | null = null): Promise<ProviderResult> {
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
@@ -276,7 +261,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     const response = await anthropic.messages.create({
       model: usedModel,
       max_tokens: 4096,
-      system: req.system_prompt + OUTPUT_SCHEMA_SUFFIX,
+      system: req.system_prompt + sufixoDeSaida(estilo),
       messages,
       tools: tools as Anthropic.Tool[],
       tool_choice: toolChoice,
@@ -405,7 +390,9 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
 
   // Cruzamento (agents/cruzamento.ts) em paralelo com o histórico: só vai ao
   // Supabase quando o turno anterior acabou há até 45 s.
-  const [history, cruzamento] = await Promise.all([
+  // `response_style` do agente (painel → prompt_config): o n8n não manda no corpo,
+  // então vem do banco, com cache curto. Falha de leitura = null = sufixo de antes.
+  const [history, cruzamento, estilo] = await Promise.all([
     getHistory(scopedClientId, 18),
     config.cruzamentoMode === 'off'
       ? Promise.resolve<MotivoCruzamento | null>(null)
@@ -413,6 +400,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
           { getUltimoTurno, getMensagensDoCliente },
           { scopedClientId, conversationId: req.conversation_id, esperouNaFila: vez.concorrente },
         ),
+    getEstiloResposta(req.agent_id),
   ]);
   const nota = cruzamento !== null && config.cruzamentoMode === 'nota';
   if (cruzamento) {
@@ -424,8 +412,8 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
 
   try {
     switch (req.model_provider) {
-      case 'openai':    result = await runOpenAI(req, history, deadline, nota);    break;
-      case 'anthropic': result = await runAnthropic(req, history, deadline, nota); break;
+      case 'openai':    result = await runOpenAI(req, history, deadline, nota, estilo);    break;
+      case 'anthropic': result = await runAnthropic(req, history, deadline, nota, estilo); break;
       /**
        * Provedor fora dos dois implementados.
        *
@@ -469,7 +457,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
       try {
         console.log('[Orchestrator] Trying OpenAI fallback...');
         providerUsed = 'openai';
-        result = await runOpenAI({ ...req, model_name: 'gpt-4.1-mini' }, history, deadline, nota);
+        result = await runOpenAI({ ...req, model_name: 'gpt-4.1-mini' }, history, deadline, nota, estilo);
       } catch (fallbackErr) {
         const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         await logError({

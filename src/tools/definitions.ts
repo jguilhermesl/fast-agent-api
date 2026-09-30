@@ -176,8 +176,14 @@ export const ORCHESTRATOR_TOOLS = [
       'Executa todas as ações necessárias antes de responder ao cliente: ' +
       'busca na base de conhecimento, executa intenções (agendamento, consulta de preços, envio de protocolo, etc.), ' +
       'envia arquivos, atualiza CRM e redireciona para humano. ' +
-      'OBRIGATÓRIO: chame esta ferramenta APENAS UMA VEZ por turno, ' +
-      'com TODAS as tarefas juntas no array "tasks". Nunca chame múltiplas vezes.',
+      'OBRIGATÓRIO: mande TODAS as tarefas do turno juntas no array "tasks", numa chamada só; ' +
+      'nunca divida as tarefas em várias chamadas. ' +
+      // 30/09/2026: "Nunca chame múltiplas vezes" brigava com a persona ("refaça a
+      // busca com o termo certo"). A segunda chamada fica restrita à busca refeita;
+      // o teto de rodadas do código (MAX_TOOL_ROUNDS) continua valendo.
+      'Única exceção: se o retorno trouxer BUSCA_VAZIA ou um item diferente do que o cliente pediu, ' +
+      'você pode chamar mais UMA vez neste turno, só com a busca refeita com outro termo. ' +
+      'Nunca repita a mesma busca com o mesmo termo e nunca chame uma terceira vez.',
     parameters: {
       type: 'object',
       properties: {
@@ -193,7 +199,7 @@ export const ORCHESTRATOR_TOOLS = [
                 description:
                   'CONSULTA=buscar informação na base de conhecimento; ' +
                   'AÇÃO=executar uma intenção configurada; ' +
-                  'AGENDAMENTO=agendar serviço/consulta; ' +
+                  'AGENDAMENTO=agendar serviço/consulta (data e horário vão em "contexto", o preço vai em "valor"); ' +
                   'ARQUIVO=enviar arquivo/mídia ao cliente; ' +
                   'CRM=atualizar estágio do lead (use "valor" com o novo stage); ' +
                   'VENDA=consultar preços ou finalizar proposta; ' +
@@ -213,9 +219,18 @@ export const ORCHESTRATOR_TOOLS = [
                 type: 'string',
                 description: 'Informações da conversa relevantes para esta tarefa',
               },
+              // 30/09/2026: dizia "AGENDAMENTO (data/hora)". Quem consome o `valor` do
+              // `realizar_agendamento` (n8n "Realizar agendamento", Duda e Carol) é o
+              // `conversion_value` numérico da conversão `sale`; o parser de lá descarta
+              // data ("barra 13/08/2026 13:30 de virar 130820261330"). 27 de 142
+              // agendamentos da Duda em 14 dias saíram com data no `valor` (estudo 09 §3).
               valor: {
                 type: 'string',
-                description: 'Usado em CRM (novo estágio do funil), AGENDAMENTO (data/hora) e CONVERSÃO',
+                description:
+                  'CRM: o slug do novo estágio do funil. ' +
+                  'AGENDAMENTO, VENDA e CONVERSÃO: o preço em reais do item (ex.: "R$ 170,00"), ' +
+                  'que vai para o campo "valor" da intenção. Nunca ponha data ou horário aqui: ' +
+                  'data e horário vão em "contexto".',
               },
             },
             required: ['tipo', 'objetivo'],

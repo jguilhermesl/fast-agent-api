@@ -448,6 +448,43 @@ export async function getKbOpcoes(agentId: string): Promise<KbOpcoes> {
   return opcoes;
 }
 
+// ── Estilo de resposta do agente ──────────────────────────────
+
+/**
+ * `agents.prompt_config.response_style` (aba Avançado → "Tamanho das mensagens").
+ *
+ * O n8n traduz o campo num parágrafo do prompt, mas não o manda no corpo do
+ * /api/chat; o sufixo de saída do Orquestrador (agents/formato-saida.ts) precisa
+ * dele para não mandar "quebre em múltiplas mensagens" a quem está no `conciso`.
+ *
+ * Cache de 60 s por agente: trocar o campo no painel chega aqui em até 1 min (no
+ * texto do n8n chega na hora). Falha de leitura devolve `null`, e `null` vira o
+ * sufixo de antes: nunca trava o turno por isso.
+ */
+const ESTILO_TTL_MS = 60_000;
+const estiloCache = new Map<string, { em: number; estilo: string | null }>();
+
+export async function getEstiloResposta(agentId: string): Promise<string | null> {
+  const cache = estiloCache.get(agentId);
+  if (cache && Date.now() - cache.em < ESTILO_TTL_MS) return cache.estilo;
+  let estilo: string | null = null;
+  try {
+    const { data, error } = await supabase
+      .from('agents')
+      .select('estilo:prompt_config->>response_style')
+      .eq('id', agentId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    const v = (data as { estilo?: unknown } | null)?.estilo;
+    estilo = typeof v === 'string' && v.trim() ? v : null;
+  } catch (err) {
+    console.error('[Estilo] response_style não lido, vale o sufixo padrão:', err instanceof Error ? err.message : String(err));
+    return null; // não guarda falha no cache: tenta de novo no próximo turno
+  }
+  estiloCache.set(agentId, { em: Date.now(), estilo });
+  return estilo;
+}
+
 interface CandidatoHibrido {
   training_id: string;
   training_name: string | null;

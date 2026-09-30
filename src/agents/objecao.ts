@@ -73,10 +73,11 @@ export const PREFIXO_OBJECAO =
   '[PRÉ-CLASSIFICAÇÃO AUTOMÁTICA: OBJEÇÃO (categoria A) — aplique as regras de tratamento de objeção da PERSONA. NÃO encerre a conversa. NÃO acione "Encerrar conversa".]';
 
 /**
- * Recusa explícita. Diz em voz alta que NÃO é objeção porque o prompt base do n8n
- * (compartilhado por 13 agentes) ainda lista "não, obrigado" e "não quero" como
- * exemplo da categoria A. Não manda encerrar: quem encerra é o cliente, e encerrar
- * muda o estado do lead no CRM.
+ * Recusa explícita. Diz em voz alta que NÃO é objeção porque até 30/09/2026 o prompt
+ * base do n8n (compartilhado por todos os agentes) listava "não, obrigado" e "não
+ * quero" como exemplo da categoria A. Desde então o n8n tem a categoria A2 (RECUSA
+ * EXPLÍCITA) com a mesma regra deste prefixo. Não manda encerrar: quem encerra é o
+ * cliente, e encerrar muda o estado do lead no CRM.
  */
 export const PREFIXO_RECUSA =
   '[PRÉ-CLASSIFICAÇÃO AUTOMÁTICA: RECUSA EXPLÍCITA — o cliente disse não. Isto NÃO é objeção: não insista, não argumente, não pergunte o motivo e não ofereça parcelamento, desconto, vaga, outra data ou outro serviço. Responda em uma frase curta que respeita a decisão e diga uma única vez que ele pode voltar a falar por aqui quando quiser. NÃO acione "Encerrar conversa".]';
