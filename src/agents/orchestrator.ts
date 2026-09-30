@@ -1,10 +1,11 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
-import { getHistory, appendHistory, lockStore, getUltimoTurno, setUltimoTurno } from '../memory/redis';
+import { getHistory, appendHistory, lockStore, getUltimoTurno, setUltimoTurno, getPendente, setPendente, delPendente } from '../memory/redis';
 import { entrarNaFila, sairDaFila, TURN_LOCK_WAIT_MS, type Vez } from '../memory/fila';
 import { detectarCruzamento, comNotaDeCruzamento, type MotivoCruzamento } from './cruzamento';
 import { cumprimentoDeveCalar } from './saudacao-espera';
+import { decidirRajada, ehConversaReal, juntarComPendente, type DecisaoRajada } from './rajada';
 import {
   saveTokenUsage,
   buildTokenLogEntry,
@@ -15,6 +16,9 @@ import {
   logGuardShadow,
   getMensagensDoCliente,
   getEstiloResposta,
+  getMensagensDaConversa,
+  getEstadoDoLead,
+  getBufferDelayMs,
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
@@ -362,19 +366,78 @@ export async function runOrchestrator(req: ChatRequest): Promise<ChatResponse> {
     console.log(`[Fila] conversation=${req.conversation_id} esperou ${vez.esperouMs}ms pelo turno anterior${vez.token ? '' : ' (seguiu sem lock)'}`);
   }
 
+  let descartado = false;
   try {
-    return await runTurno(req, scopedClientId, deadline, vez, inicio);
+    const resposta = await runTurno(req, scopedClientId, deadline, vez, inicio);
+    descartado = resposta.logs?.turno?.descartado === true;
+    return resposta;
   } finally {
     // Juntos, na mesma conexão: o SET sai antes do EVAL e o Redis executa em
     // ordem, então quem pegar o lock em seguida já lê o registro novo.
     await Promise.all([
-      setUltimoTurno(scopedClientId, { inicio, fim: Date.now() }),
+      setUltimoTurno(scopedClientId, { inicio, fim: Date.now(), ...(descartado ? { descartado: true } : {}) }),
       sairDaFila(lockStore, scopedClientId, vez),
     ]);
   }
 }
 
+/**
+ * Leituras da decisão de fim de turno (agents/rajada.ts), em paralelo. Qualquer
+ * falha devolve `null` e o turno responde como antes (fail-open).
+ */
+async function avaliarRajada(
+  req: ChatRequest,
+  p: { inicio: number; vez: Vez; tools: string[]; redirect: boolean; descartesAnteriores: number },
+): Promise<DecisaoRajada | null> {
+  try {
+    const agora = Date.now();
+    const [bufferDelayMs, lead, msgs, ultimo] = await Promise.all([
+      getBufferDelayMs(req.agent_id),
+      getEstadoDoLead(req.conversation_id),
+      // 35 s cobre o maior BufferDelay ativo (30 s) mais a folga.
+      getMensagensDaConversa(req.conversation_id, new Date(p.inicio - 35_000).toISOString(), new Date(agora + 1_000).toISOString()),
+      getUltimoTurno(req.agent_id + ':' + req.contact_phone),
+    ]);
+    return decidirRajada({
+      inicio: p.inicio,
+      agora: Date.now(),
+      bufferDelayMs,
+      loteTexto: req.client_messages,
+      tools: p.tools,
+      redirect: p.redirect,
+      lockDesde: p.vez.token ? p.inicio + p.vez.esperouMs : null,
+      esperaMaxFilaMs: TURN_LOCK_WAIT_MS,
+      descartesAnteriores: p.descartesAnteriores,
+      inicioUltimoTurno: ultimo?.inicio ?? null,
+      lead,
+      msgs,
+    });
+  } catch (err) {
+    console.error('[Rajada] decisão falhou, turno responde normal:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
 async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Deadline, vez: Vez, inicio: number): Promise<ChatResponse> {
+  // Turno anterior desta rajada foi descartado (agents/rajada.ts): o texto dele
+  // entra aqui, antes de tudo, como se o n8n tivesse juntado as duas mensagens.
+  // Vale em qualquer RAJADA_MODE: o pendente existe, o cliente escreveu aquilo.
+  let juntouPendente = false;
+  let descartesAnteriores = 0;
+  if (ehConversaReal(req.conversation_id)) {
+    const pendente = await getPendente(scopedClientId);
+    if (pendente) {
+      await delPendente(scopedClientId);
+      const j = juntarComPendente(pendente, { texto: req.client_messages, tipo: req.client_message_type ?? 'text' }, Date.now());
+      if (j.juntou) {
+        req = { ...req, client_messages: j.texto, client_message_type: j.tipo };
+        juntouPendente = true;
+        descartesAnteriores = j.descartes;
+        console.log(`[Rajada] conversation=${req.conversation_id} juntou o texto do turno descartado (descartes=${j.descartes}, idade=${Date.now() - pendente.em}ms)`);
+      }
+    }
+  }
+
   // Cumprimento sozinho com a pergunta já na conversa (agents/saudacao-espera.ts):
   // cala, e o turno da pergunta responde tudo. Roda dentro da fila da conversa.
   if (req.client_message_type === 'text' && isGreetingOrFarewell(req.client_messages)) {
@@ -611,12 +674,63 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     }
   }
 
+  // ── Uma resposta por rajada (agents/rajada.ts) ────────────────
+  // Chegou fala nova do cliente durante o turno: o turno dela vem logo atrás e
+  // responde tudo junto. Este não entrega nada e não grava a resposta como dita.
+  const toolsDoTurno = result.executorTrace.tools_called.map((t) => t.tool);
+  const rajada = config.rajadaMode === 'off' || !ehConversaReal(req.conversation_id)
+    ? null
+    : await avaliarRajada(req, { inicio, vez, tools: toolsDoTurno, redirect: parsed.redirect_human, descartesAnteriores });
+  const turnoBase = { esperou_fila_ms: vez.esperouMs, cruzamento, nota_cruzamento: nota, ...(juntouPendente ? { juntou_pendente: true } : {}) };
+  const rajadaLog = rajada ? { ...rajada, modo: config.rajadaMode } : undefined;
+
+  if (rajada && (rajada.acao === 'descartar' || rajada.humano_no_turno > 0)) {
+    console.log(`[Rajada] conversation=${req.conversation_id} acao=${rajada.acao} motivo=${rajada.motivo} novas=${rajada.novas} humano_no_turno=${rajada.humano_no_turno} modo=${config.rajadaMode} tools=${toolsDoTurno.join(',') || '-'} elapsed=${Date.now() - inicio}ms`);
+  }
+
+  if (rajada?.acao === 'descartar' && config.rajadaMode === 'descartar') {
+    let pode = true;
+    if (rajada.motivo === 'mensagem_nova') {
+      // Sem o pendente gravado o texto deste turno se perderia: aí responde normal.
+      pode = await setPendente(scopedClientId, {
+        texto: req.client_messages,
+        tipo: req.client_message_type ?? 'text',
+        em: Date.now(),
+        descartes: descartesAnteriores + 1,
+      });
+    } else {
+      // Atendente assumiu: guarda a fala do cliente, não a resposta que não vai sair.
+      await appendHistory(scopedClientId, [
+        { role: 'user', content: historyPrefix(req.client_message_type) + req.client_messages },
+      ]);
+    }
+    if (pode) {
+      return {
+        mensagens: [],
+        redirect_human: false,
+        logs: {
+          history,
+          orchestrator: {
+            provider: providerUsed,
+            model: result.model,
+            rounds: result.rounds,
+            tokens_input: result.tokensIn,
+            tokens_output: result.tokensOut,
+            cost_usd: costUsd,
+          },
+          executor: result.executorTrace,
+          turno: { ...turnoBase, descartado: true, rajada: rajadaLog },
+          communication: result.communications.length > 0 ? result.communications : undefined,
+        },
+      };
+    }
+    console.error(`[Rajada] conversation=${req.conversation_id} pendente não gravado, turno responde normal`);
+  }
+
   // Atualiza histórico Redis — salva o texto limpo das mensagens, não o JSON bruto.
   // Isso evita que o modelo veja JSON estrutural no histórico em vez de linguagem natural.
   const assistantContent = parsed.mensagens.join('\n');
-  const toolsUsed = result.executorTrace.called
-    ? result.executorTrace.tools_called.map((t) => t.tool)
-    : undefined;
+  const toolsUsed = result.executorTrace.called ? toolsDoTurno : undefined;
   await appendHistory(scopedClientId, [
     { role: 'user',      content: historyPrefix(req.client_message_type) + req.client_messages },
     { role: 'assistant', content: assistantContent, tools: toolsUsed },
@@ -633,7 +747,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
       cost_usd: costUsd,
     },
     executor: result.executorTrace,
-    turno: { esperou_fila_ms: vez.esperouMs, cruzamento, nota_cruzamento: nota },
+    turno: { ...turnoBase, ...(rajadaLog ? { rajada: rajadaLog } : {}) },
     communication: result.communications.length > 0 ? result.communications : undefined,
   };
 

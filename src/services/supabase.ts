@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from '../config';
 import type { AgentIntent, IntentLog, TokenLogEntry } from '../types';
 import type { MensagemDoCliente } from '../agents/cruzamento';
+import type { EstadoDoLead, MensagemDaConversa } from '../agents/rajada';
 
 // Cliente service_role para operações privilegiadas
 export const supabase = createClient(config.supabaseUrl, config.supabaseServiceKey);
@@ -141,6 +142,82 @@ export async function getMensagensDoCliente(
 
   if (error) throw new Error(`getMensagensDoCliente: ${error.message}`);
   return data ?? [];
+}
+
+// ── Rajada (agents/rajada.ts) ─────────────────────────────────
+
+/** Mensagens da conversa nas duas direções, para a decisão de fim de turno. */
+export async function getMensagensDaConversa(
+  conversationId: string,
+  desdeIso: string,
+  ateIso: string
+): Promise<MensagemDaConversa[]> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('created_at, direction, message_type, content, sender_name, from_device:metadata->>from_device')
+    .eq('conversation_id', conversationId)
+    .gte('created_at', desdeIso)
+    .lte('created_at', ateIso)
+    .order('created_at', { ascending: true })
+    .limit(50);
+
+  if (error) throw new Error(`getMensagensDaConversa: ${error.message}`);
+  return (data ?? []).map((m) => {
+    const r = m as Record<string, unknown>;
+    return {
+      created_at: String(r.created_at),
+      direction: String(r.direction ?? ''),
+      message_type: (r.message_type as string | null) ?? null,
+      content: (r.content as string | null) ?? null,
+      sender_name: (r.sender_name as string | null) ?? null,
+      from_device: r.from_device === true || r.from_device === 'true',
+    };
+  });
+}
+
+/** Dono e status da conversa agora (`leads.id` = `conversation_id`). */
+export async function getEstadoDoLead(conversationId: string): Promise<EstadoDoLead | null> {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('handled_by, status, ai_disabled:metadata->>ai_disabled')
+    .eq('id', conversationId)
+    .maybeSingle();
+  if (error) throw new Error(`getEstadoDoLead: ${error.message}`);
+  if (!data) return null;
+  const r = data as Record<string, unknown>;
+  return {
+    handled_by: (r.handled_by as string | null) ?? null,
+    status: (r.status as string | null) ?? null,
+    ai_disabled: r.ai_disabled === true || r.ai_disabled === 'true',
+  };
+}
+
+/**
+ * `prompt_config.delays.max_ms` do agente (o BufferDelay do n8n), com cache de 60 s
+ * como o `response_style`. Falha de leitura = `null`: a regra da rajada usa só a
+ * folga curta, que é a mais conservadora.
+ */
+const bufferCache = new Map<string, { em: number; ms: number | null }>();
+
+export async function getBufferDelayMs(agentId: string): Promise<number | null> {
+  const cache = bufferCache.get(agentId);
+  if (cache && Date.now() - cache.em < 60_000) return cache.ms;
+  let ms: number | null = null;
+  try {
+    const { data, error } = await supabase
+      .from('agents')
+      .select('max_ms:prompt_config->delays->>max_ms')
+      .eq('id', agentId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    const v = Number((data as { max_ms?: unknown } | null)?.max_ms);
+    ms = Number.isFinite(v) && v > 0 ? v : null;
+  } catch (err) {
+    console.error('[Rajada] delays.max_ms não lido, vale a folga curta:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
+  bufferCache.set(agentId, { em: Date.now(), ms });
+  return ms;
 }
 
 // ── Token tracking ────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { config } from '../config';
 import type { ChatMessage } from '../types';
 import type { LockStore } from './fila';
 import type { RegistroTurno } from '../agents/cruzamento';
+import type { Pendente } from '../agents/rajada';
 
 const redis = new Redis(config.redisUrl, { lazyConnect: true, db: 1 });
 
@@ -54,7 +55,7 @@ export async function appendHistory(
 }
 
 // ── Fila de turnos (memory/fila.ts) ───────────────────────────
-// Chaves `fila:turno:*` e `turno:ultimo:*` não colidem com o histórico, cuja
+// Chaves `fila:turno:*`, `turno:ultimo:*` e `turno:pendente:*` não colidem com o histórico, cuja
 // chave é o `agent_id:telefone` puro.
 
 // Apaga só se o lock ainda for deste turno (compare-and-delete atômico).
@@ -85,6 +86,39 @@ export async function setUltimoTurno(scopedClientId: string, registro: RegistroT
     await redis.set(`turno:ultimo:${scopedClientId}`, JSON.stringify(registro), 'EX', TTL_ULTIMO_TURNO_SECONDS);
   } catch (err) {
     console.error('[Redis] setUltimoTurno error:', err);
+  }
+}
+
+// Texto do cliente de um turno descartado (agents/rajada.ts), lido e apagado
+// pelo turno seguinte da mesma conversa. Validade curta: é a mesma rajada.
+const TTL_PENDENTE_SECONDS = 900;
+
+export async function getPendente(scopedClientId: string): Promise<Pendente | null> {
+  try {
+    const raw = await redis.get(`turno:pendente:${scopedClientId}`);
+    return raw ? (JSON.parse(raw) as Pendente) : null;
+  } catch (err) {
+    console.error('[Redis] getPendente error:', err);
+    return null;
+  }
+}
+
+/** `false` = não gravou; quem chamou não pode descartar o turno. */
+export async function setPendente(scopedClientId: string, pendente: Pendente): Promise<boolean> {
+  try {
+    await redis.set(`turno:pendente:${scopedClientId}`, JSON.stringify(pendente), 'EX', TTL_PENDENTE_SECONDS);
+    return true;
+  } catch (err) {
+    console.error('[Redis] setPendente error:', err);
+    return false;
+  }
+}
+
+export async function delPendente(scopedClientId: string): Promise<void> {
+  try {
+    await redis.del(`turno:pendente:${scopedClientId}`);
+  } catch (err) {
+    console.error('[Redis] delPendente error:', err);
   }
 }
 

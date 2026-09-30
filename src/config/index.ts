@@ -40,6 +40,14 @@ export const config = {
     ? process.env.CRUZAMENTO_MODE
     : 'nota') as 'nota' | 'log' | 'off',
 
+  // Uma resposta por rajada (src/agents/rajada.ts). `descartar` (padrão) devolve
+  // `mensagens: []` quando chegou fala nova do cliente durante o turno e guarda o
+  // texto para o turno seguinte; `log` só decide e loga; `off` nem consulta.
+  // Env var pelo mesmo motivo do GUARD_MODE: voltar atrás sem mexer no código.
+  rajadaMode: (['log', 'off'].includes(process.env.RAJADA_MODE ?? '')
+    ? process.env.RAJADA_MODE
+    : 'descartar') as 'descartar' | 'log' | 'off',
+
   // A tabela de tarifas saiu daqui para `src/services/pricing.ts`, que espelha o
   // `llm_pricing` do Supabase e roda em teste sem env var. Enquanto morava neste
   // objeto, `gpt-5.4-mini` era cobrado na tarifa do `gpt-5.4` e ninguém tinha

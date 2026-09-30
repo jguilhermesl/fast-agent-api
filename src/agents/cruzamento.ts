@@ -21,6 +21,8 @@ import { limparEventosDoProvedor } from './entrada';
 export interface RegistroTurno {
   inicio: number;
   fim: number;
+  /** A resposta não saiu (agents/rajada.ts): não há o que cruzar com ela. */
+  descartado?: boolean;
 }
 
 /** Linha de `messages` (direction = inbound) — só o que a regra usa. */
@@ -65,7 +67,7 @@ export function janelaDeCruzamento(
   anterior: RegistroTurno | null,
   agora: number,
 ): { desde: number; ate: number } | null {
-  if (!anterior) return null;
+  if (!anterior || anterior.descartado) return null;
   if (agora - anterior.fim > JANELA_CRUZAMENTO_MS) return null;
   return { desde: anterior.inicio - FOLGA_ANTES_MS, ate: anterior.fim + FOLGA_DEPOIS_MS };
 }
@@ -106,7 +108,12 @@ export async function detectarCruzamento(
   deps: DepsCruzamento,
   p: { scopedClientId: string; conversationId: string; esperouNaFila: boolean },
 ): Promise<MotivoCruzamento | null> {
-  if (p.esperouNaFila) return 'fila';
+  if (p.esperouNaFila) {
+    // O turno da frente foi descartado (agents/rajada.ts): a resposta dele não
+    // saiu, e o texto dele já veio junto neste turno. Não houve cruzamento.
+    const anterior = await deps.getUltimoTurno(p.scopedClientId).catch(() => null);
+    return anterior?.descartado ? null : 'fila';
+  }
   // Suíte de avaliação manda conversation_id que não é UUID ("suite-…"): a
   // coluna é uuid e a consulta só devolveria erro.
   if (!UUID.test(p.conversationId)) return null;

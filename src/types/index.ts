@@ -57,6 +57,11 @@ export interface ExecutionLogs {
     esperou_fila_ms: number;
     cruzamento: 'fila' | 'tempo' | null;
     nota_cruzamento: boolean;
+    /** Juntou o texto de um turno descartado (agents/rajada.ts). */
+    juntou_pendente?: boolean;
+    /** A resposta deste turno não foi entregue (agents/rajada.ts). */
+    descartado?: boolean;
+    rajada?: { acao: 'enviar' | 'descartar'; motivo: string; novas: number; humano_no_turno: number; modo: string };
   };
   communication?: Array<{
     query: string;

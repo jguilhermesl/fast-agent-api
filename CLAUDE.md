@@ -21,7 +21,7 @@ npm run test:smoke   # tsx scripts/smoke-http.ts
 
 Env obrigatória (só nomes, `src/config/index.ts`): `API_SECRET`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `WEBHOOK_SECRET`. Opcional: `REDIS_URL`,
-`ZAPI_CLIENT_TOKEN`, `GUARD_MODE`, `CRUZAMENTO_MODE`. Qual Supabase está no env do Railway: não verificado.
+`ZAPI_CLIENT_TOKEN`, `GUARD_MODE`, `CRUZAMENTO_MODE`, `RAJADA_MODE`. Qual Supabase está no env do Railway: não verificado.
 
 Estado das chaves no Railway (conferido em 30/09/2026):
 - `API_SECRET` é o placeholder `your-secret-key-here` e autentica `/api/chat` e `/api/send-external`. A troca
@@ -47,6 +47,12 @@ Estado das chaves no Railway (conferido em 30/09/2026):
   salvo necessidade real; os outros estilos recebem o texto antigo byte a byte.
 - **Base de conhecimento** (`8e30dfd`): RPC `buscar_conhecimento` (vetor + palavra, por fatia) com corte
   `prompt_config.kb.corte_hibrido`. `match_documents` fica como reserva.
+- **Uma resposta por rajada** (`src/agents/rajada.ts`): no fim do turno, se o cliente mandou fala nova que não está
+  no lote, o turno devolve `mensagens: []` (o n8n não envia), não grava a resposta no Redis e guarda o texto em
+  `turno:pendente:<agent>:<fone>`; o turno seguinte junta e responde tudo. Não descarta com transferência,
+  ferramenta com efeito (agendar, `enviar_*`, encerrar), sem lock da fila ou depois de 2 descartes seguidos.
+  Decisão em `interaction_logs.payload.logs.turno.rajada` e no log `[Rajada]`. `RAJADA_MODE=log` só decide e
+  loga; `off` desliga (env no Railway, sem mexer no código).
 - Mudou algo aqui: testes (`npm test`), push, `/api/version`, e suíte da Duda antes e depois. A suíte é paga
   (~US$ 0,08 por conversa-repetição): pergunte ao dono com o valor.
 

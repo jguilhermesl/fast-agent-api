@@ -97,12 +97,23 @@ describe('detectarCruzamento', () => {
     );
   });
 
-  it('turno que esperou na fila cruzou por definição — nem consulta', async () => {
+  it('turno que esperou na fila cruzou por definição — não consulta o Supabase', async () => {
     const d = deps();
     const r = await detectarCruzamento(d, { scopedClientId: 'x', conversationId: CONV_79F, esperouNaFila: true });
 
     expect(r).toBe('fila');
-    expect(d.getUltimoTurno).not.toHaveBeenCalled();
+    expect(d.getMensagensDoCliente).not.toHaveBeenCalled();
+  });
+
+  it('esperou na fila atrás de um turno descartado (agents/rajada.ts): a resposta dele não saiu, sem aviso', async () => {
+    const d = deps({ getUltimoTurno: vi.fn(async () => ({ ...T1_79F, descartado: true })) });
+    expect(await detectarCruzamento(d, { scopedClientId: 'x', conversationId: CONV_79F, esperouNaFila: true })).toBeNull();
+    expect(d.getMensagensDoCliente).not.toHaveBeenCalled();
+  });
+
+  it('turno anterior descartado não abre janela de cruzamento', async () => {
+    const d = deps({ getUltimoTurno: vi.fn(async () => ({ ...T1_79F, descartado: true })) });
+    expect(await detectarCruzamento(d, { scopedClientId: 'x', conversationId: CONV_79F, esperouNaFila: false })).toBeNull();
     expect(d.getMensagensDoCliente).not.toHaveBeenCalled();
   });
 
