@@ -126,7 +126,7 @@ export async function detectarCruzamento(
 }
 
 /**
- * Aviso para o modelo, no mesmo formato da pré-classificação de objeção em
+ * Aviso para o modelo, no mesmo formato da pré-classificação de recusa e objeção em
  * `formatClientMessage`. Não vai para o histórico nem para o Executor.
  */
 export const NOTA_CRUZAMENTO =

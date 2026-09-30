@@ -20,6 +20,7 @@ import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
+import { prefixoDeClassificacao } from './objecao';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, TURN_BUDGET_MS, type Deadline } from '../services/deadline';
@@ -53,22 +54,9 @@ const MAX_TOOL_ROUNDS = 5;
 // Mensagens curtas de cumprimento não precisam de busca na base de conhecimento.
 // Para tudo o mais, forçamos o executor no primeiro round.
 
-const OBJECTION_PATTERNS = [
-  /não[,\s]+(obrigad[oa]|quero|preciso|tenho interesse|vou|posso)/i,
-  /nao[,\s]+(obrigad[oa]|quero|preciso|tenho interesse|vou|posso)/i,
-  /(tá|ta|está|esta)\s+caro/i,
-  /(é|e)\s+longe|fica\s+longe|muito\s+longe/i,
-  /vou\s+ver\s+depois|deixa\s+pra\s+depois|depois\s+(eu\s+)?falo|vou\s+pensar|deixa\s+eu\s+pensar/i,
-  /não\s+preciso|nao\s+preciso|não\s+quero|nao\s+quero/i,
-  /deixa\s+pra\s+lá|deixa\s+pra\s+la|esquece|desisti/i,
-  /outro\s+momento|não\s+é\s+pra\s+mim|nao\s+e\s+pra\s+mim/i,
-];
-
-function isObjection(message: string): boolean {
-  const trimmed = message.trim();
-  if (trimmed.length > 200) return false;
-  return OBJECTION_PATTERNS.some((p) => p.test(trimmed));
-}
+// Pré-classificação de recusa × objeção: `./objecao.ts` (função pura, com teste).
+// Até 30/09/2026 "não quero", "não tenho interesse" e "não posso" eram marcados
+// como OBJEÇÃO e o agente insistia depois de um não.
 
 // ── Schema de output injetado no system_prompt ────────────────
 // Garante que o modelo saiba exatamente o formato esperado,
@@ -108,11 +96,10 @@ function formatarPorTipo(content: string, type?: string): string {
       return `[O cliente enviou uma imagem. A descrição abaixo foi gerada automaticamente — não é texto digitado pelo cliente.]\n\n${content}`;
     case 'audio_transcription':
       return `[O cliente enviou um áudio. A transcrição abaixo foi gerada automaticamente.]\n\n${content}`;
-    default:
-      if (isObjection(content)) {
-        return `[PRÉ-CLASSIFICAÇÃO AUTOMÁTICA: OBJEÇÃO (categoria A) — aplique as regras de tratamento de objeção da PERSONA. NÃO encerre a conversa. NÃO acione "Encerrar conversa".]\n\n${content}`;
-      }
-      return content;
+    default: {
+      const prefixo = prefixoDeClassificacao(content);
+      return prefixo ? `${prefixo}\n\n${content}` : content;
+    }
   }
 }
 
