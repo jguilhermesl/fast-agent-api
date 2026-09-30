@@ -23,6 +23,7 @@ import { isGreetingOrFarewell } from './saudacao';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, TURN_BUDGET_MS, type Deadline } from '../services/deadline';
+import { deveUsarReserva } from '../services/credito';
 import type { ChatRequest, ChatResponse, ChatMessage, ExecutorTrace, ExecutionLogs } from '../types';
 
 /**
@@ -258,7 +259,19 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
 
 // ── Anthropic Orchestrator ────────────────────────────────────
 
-async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false): Promise<ProviderResult> {
+/**
+ * `executorProvider`: agente configurado como `anthropic` continua com o Executor
+ * na OpenAI (padrão, comportamento de sempre). Só a reserva de crédito
+ * (services/credito.ts) passa `'anthropic'`: com o crédito da OpenAI zerado, o
+ * Executor na OpenAI falharia do mesmo jeito que o Orquestrador falhou.
+ */
+async function runAnthropic(
+  req: ChatRequest,
+  history: ChatMessage[],
+  deadline: Deadline,
+  nota = false,
+  executorProvider: 'openai' | 'anthropic' = 'openai',
+): Promise<ProviderResult> {
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
@@ -341,6 +354,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
         client_messages: req.client_messages,
         conversation_context: conversationContext,
         deadline,
+        provider: executorProvider,
       });
       allExecutorTraces.push(executorResult.trace);
       communications.push({ query, result: executorResult.result });
@@ -491,6 +505,43 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
           lead_id: req.lead_id,
           error_message: `Primary: ${errMsg} | Fallback: ${fallbackMsg}`,
           provider_failed: `${req.model_provider}+openai`,
+          layer: 'orchestrator',
+        });
+        return makeFallback(history);
+      }
+    } else if (deveUsarReserva({
+      provider: req.model_provider,
+      err: primaryErr,
+      habilitado: config.fallbackCredito === 'on',
+      temChave: !!config.anthropicApiKey,
+    })) {
+      // Crédito da OpenAI zerado (02/09 e 29/09/2026: todo agente `openai` virou
+      // "Só um momento" + transferência). Refaz o turno inteiro na Anthropic,
+      // Orquestrador e Executor, com o mesmo prompt e as mesmas ferramentas.
+      // O `logError` roda também no SUCESSO: a linha carrega o texto original do
+      // erro de crédito, que é o que o alerta do n8n procura em `agent_error_logs`
+      // — a reserva não pode esconder que a conta zerou.
+      const modeloReserva = config.fallbackAnthropicModel;
+      try {
+        console.warn(`[Orchestrator] Crédito OpenAI esgotado — reserva anthropic/${modeloReserva} (conversation=${req.conversation_id})`);
+        result = await runAnthropic({ ...req, model_name: modeloReserva }, history, deadline, nota, 'anthropic');
+        providerUsed = 'anthropic';
+        await logError({
+          conversation_id: req.conversation_id,
+          agent_id: req.agent_id,
+          lead_id: req.lead_id,
+          error_message: `Reserva anthropic/${modeloReserva} respondeu. Erro OpenAI: ${errMsg}`,
+          provider_failed: 'openai',
+          layer: 'orchestrator-fallback-credito',
+        });
+      } catch (reservaErr) {
+        const reservaMsg = reservaErr instanceof Error ? reservaErr.message : String(reservaErr);
+        await logError({
+          conversation_id: req.conversation_id,
+          agent_id: req.agent_id,
+          lead_id: req.lead_id,
+          error_message: `Primary: ${errMsg} | Reserva anthropic/${modeloReserva}: ${reservaMsg}`,
+          provider_failed: 'openai+anthropic',
           layer: 'orchestrator',
         });
         return makeFallback(history);

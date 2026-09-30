@@ -174,3 +174,19 @@ describe('inferModelProvider', () => {
     expect(inferModelProvider('llama-3')).toBe('unknown');
   });
 });
+
+// Reserva de crédito (services/credito.ts): o modelo padrão da reserva é
+// `claude-sonnet-4-6`. Sem tarifa própria ele cairia em TARIFA_DESCONHECIDA (1/3)
+// e o custo do turno de emergência apareceria 3–5x menor no painel.
+describe('tarifa do modelo reserva (claude-sonnet-4-6)', () => {
+  it('resolve para a família claude-sonnet-4: 3 / 15 / 0,30 por 1M', () => {
+    expect(tarifaDe('claude-sonnet-4-6')).toEqual({ input: 3, output: 15, cached: 0.3 });
+    expect(tarifaDe('claude-sonnet-4-6-20260301')).toEqual({ input: 3, output: 15, cached: 0.3 });
+  });
+
+  it('custo de um turno típico da Duda na reserva (13,5k in, 12,8k cacheados, 200 out)', () => {
+    // (700 × 3 + 12.800 × 0,3 + 200 × 15) / 1e6 = 0,00894
+    expect(calcCostUsd('claude-sonnet-4-6', 13_500, 200, 12_800)).toBeCloseTo(0.00894, 8);
+    expect(inferModelProvider('claude-sonnet-4-6')).toBe('anthropic');
+  });
+});

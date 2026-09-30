@@ -92,6 +92,12 @@ export interface ExecutorInput {
   conversation_context?: string;    // últimas mensagens do histórico (para dar contexto ao Executor)
   /** Orçamento de tempo do turno inteiro (ver services/deadline.ts). Ausente = sem teto agregado. */
   deadline?: Deadline;
+  /**
+   * Provedor do LLM do Executor. Ausente = `openai` (`gpt-5.4-mini`), como sempre.
+   * `anthropic` só é usado pela reserva de crédito (services/credito.ts): com o
+   * crédito da OpenAI zerado, o Executor na OpenAI falharia do mesmo jeito.
+   */
+  provider?: 'openai' | 'anthropic';
 }
 
 // Intent configurada no Supabase (agent_intents)

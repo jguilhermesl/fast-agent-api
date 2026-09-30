@@ -40,6 +40,19 @@ export const config = {
     ? process.env.CRUZAMENTO_MODE
     : 'nota') as 'nota' | 'log' | 'off',
 
+  // Reserva quando o crédito da OpenAI zera (services/credito.ts): o turno de um
+  // agente `openai` é refeito na Anthropic, Orquestrador e Executor. Liga por
+  // padrão; `FALLBACK_CREDITO=off` desliga sem redeploy (mesmo motivo do
+  // GUARD_MODE). Sem `ANTHROPIC_API_KEY` válida a reserva falha em ~0,3 s e o
+  // turno cai no fallback de segurança de sempre — nada piora.
+  fallbackCredito: (process.env.FALLBACK_CREDITO === 'off' ? 'off' : 'on') as 'on' | 'off',
+  // `claude-sonnet-4-6` é o ID que já roda no n8n (nó "Anthropic Chat Model" do
+  // AGENTE BASE, mesma conta). O equivalente natural do `gpt-5.4-mini` no Executor
+  // seria um Haiku, mas nenhum ID de Haiku foi verificado nesta conta: numa
+  // emergência, ID que responde vale mais que tarifa. Trocar é só env var.
+  fallbackAnthropicModel: process.env.FALLBACK_ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+  fallbackAnthropicExecutorModel: process.env.FALLBACK_ANTHROPIC_EXECUTOR_MODEL || 'claude-sonnet-4-6',
+
   // A tabela de tarifas saiu daqui para `src/services/pricing.ts`, que espelha o
   // `llm_pricing` do Supabase e roda em teste sem env var. Enquanto morava neste
   // objeto, `gpt-5.4-mini` era cobrado na tarifa do `gpt-5.4` e ninguém tinha
