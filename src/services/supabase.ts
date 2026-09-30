@@ -448,12 +448,89 @@ export async function getKbOpcoes(agentId: string): Promise<KbOpcoes> {
   return opcoes;
 }
 
+interface CandidatoHibrido {
+  training_id: string;
+  training_name: string | null;
+  content: string | null;
+  similarity: number | null;
+  lexical: number | null;
+  score: number | null;
+  passou: boolean | null;
+}
+
+/**
+ * Busca híbrida (30/09/2026): função SQL `buscar_conhecimento` do chat-flow-pilot-63
+ * (migration 20260930130100). Vetor + palavra sobre fatias de ~300–800 chars de cada
+ * treinamento, corte e exclusão por agente lidos no próprio banco
+ * (`prompt_config.kb.corte_hibrido`, `excluir_injetados`). É a MESMA função que a Edge
+ * Function `search-training` ("Testar conhecimento" do painel) chama: o que o painel
+ * mostra é o que chega aqui.
+ *
+ * Medido num conjunto de 267 perguntas reais (Duda, Carol, Diana): trechos que não
+ * tinham nada a ver com a pergunta caíram de 62% para 32% do que a busca devolve, e
+ * pergunta sem resposta na base recebendo trecho mesmo assim caiu de 42% para 22%, com
+ * o mesmo acerto (hit@3 86% → 89%). Detalhe: `estudo-20260930/execucao-rag.md`.
+ *
+ * Devolve `null` quando a função não responde (não existe, erro de banco): quem chama
+ * cai no `match_documents` antigo, que continua no ar.
+ */
+async function buscarHibrida(
+  agentId: string,
+  queryText: string,
+  queryEmbedding: number[],
+  limit: number,
+): Promise<string | null> {
+  const { data, error } = await supabase.rpc('buscar_conhecimento', {
+    p_agent_id: agentId,
+    p_query: queryText,
+    p_query_embedding: queryEmbedding,
+    p_match_count: limit,
+  });
+  if (error) {
+    console.error('[KB] buscar_conhecimento falhou, caindo no match_documents:', error.message);
+    return null;
+  }
+
+  const docs = (data ?? []) as CandidatoHibrido[];
+  console.log(`[KB] query retornou ${docs.length} chunks para agent_id=${agentId} (hibrida):`);
+  docs.forEach((d, i) => {
+    const preview = (d.content ?? '').slice(0, 80).replace(/\n/g, ' ');
+    console.log(
+      `  [${i + 1}] similarity=${(d.similarity ?? 0).toFixed(4)} lexical=${(d.lexical ?? 0).toFixed(3)} score=${(d.score ?? 0).toFixed(4)} passou=${d.passou === true} | training=${d.training_id} | "${preview}..."`,
+    );
+  });
+
+  const aprovados = docs.filter((d) => d.passou === true).slice(0, limit);
+  console.log(`[KB] após filtro (hibrida): ${aprovados.length} chunks aprovados`);
+  if (aprovados.length === 0) return '(nenhuma informação relevante encontrada na base de conhecimento)';
+  return aprovados.map((d) => truncarTrecho(d.content ?? '')).join('\n\n---\n\n');
+}
+
+function truncarTrecho(texto: string): string {
+  const text = texto.trim();
+  // Trunca chunks muito longos mantendo frases completas
+  if (text.length <= KB_MAX_CHUNK_CHARS) return text;
+  const truncated = text.slice(0, KB_MAX_CHUNK_CHARS);
+  const lastPeriod = truncated.lastIndexOf('.');
+  return lastPeriod > KB_MAX_CHUNK_CHARS * 0.6 ? truncated.slice(0, lastPeriod + 1) : truncated + '...';
+}
+
+/**
+ * Com `queryText`, usa a busca híbrida (`buscarHibrida`); sem ele, ou se ela falhar,
+ * o caminho antigo: `match_documents` só por vetor + pós-filtro de `opcoes`.
+ */
 export async function searchKnowledgeBase(
   agentId: string,
   queryEmbedding: number[],
   limit = KB_MATCH_COUNT,
   opcoes: KbOpcoes = {},
+  queryText?: string,
 ): Promise<string> {
+  if (typeof queryText === 'string' && queryText.trim()) {
+    const hibrida = await buscarHibrida(agentId, queryText, queryEmbedding, limit);
+    if (hibrida !== null) return hibrida;
+  }
+
   const minimo = opcoes.minSimilarity ?? KB_MIN_SIMILARITY;
   const excluir = opcoes.excluirIds ?? new Set<string>();
   const { data, error } = await supabase.rpc('match_documents', {
@@ -488,16 +565,5 @@ export async function searchKnowledgeBase(
     return '(nenhuma informação relevante encontrada na base de conhecimento)';
   }
 
-  return relevant
-    .map((doc) => {
-      const text = doc.content.trim();
-      // Trunca chunks muito longos mantendo frases completas
-      if (text.length <= KB_MAX_CHUNK_CHARS) return text;
-      const truncated = text.slice(0, KB_MAX_CHUNK_CHARS);
-      const lastPeriod = truncated.lastIndexOf('.');
-      return lastPeriod > KB_MAX_CHUNK_CHARS * 0.6
-        ? truncated.slice(0, lastPeriod + 1)
-        : truncated + '...';
-    })
-    .join('\n\n---\n\n');
+  return relevant.map((doc) => truncarTrecho(doc.content)).join('\n\n---\n\n');
 }

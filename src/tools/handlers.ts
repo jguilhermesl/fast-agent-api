@@ -179,7 +179,9 @@ export async function handleKnowledgeBase(
     const embedding = embeddingResponse.data[0].embedding;
 
     // Busca no Supabase Vector Store
-    const result = await searchKnowledgeBase(ctx.agent_id, embedding, undefined, await getKbOpcoes(ctx.agent_id));
+    // O texto da busca vai junto: a busca híbrida casa palavra além do vetor (só
+    // pelo vetor, "preparo endoscopia" empatava com o preparo de outros exames).
+    const result = await searchKnowledgeBase(ctx.agent_id, embedding, undefined, await getKbOpcoes(ctx.agent_id), args.query);
     // A KB devolve TEXTO, não JSON: as duas frases abaixo são o "não achei" dela.
     // Sem traduzir para status='empty', o modelo lia a frase como conteúdo.
     const vazio =
