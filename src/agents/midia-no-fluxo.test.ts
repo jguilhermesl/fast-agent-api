@@ -102,6 +102,25 @@ describe('intercalarMidias', () => {
     ]);
   });
 
+  it('abertura grudada na ficha (saída real da Canda, 05/10 20:27): cumprimento → abertura → fotos → ficha', () => {
+    const msgs = [
+      'Bom dia, Carlos, tudo bem? Aqui é a Canda, assistente virtual da Costa & Muniz.',
+      'Separei umas fotos do apartamento pra você.\n\nApartamento novo a 2 quadras da praia, em Manaíra\nBairro: Manaíra, 400 m da praia\nValor: R$ 729.000\n\nÉ esse imóvel que te atende?',
+    ];
+    expect(intercalarMidias(msgs, [FOTO1, FOTO2])).toEqual([
+      msgs[0],
+      'Separei umas fotos do apartamento pra você.',
+      marcadorMidia(FOTO1),
+      marcadorMidia(FOTO2),
+      'Apartamento novo a 2 quadras da praia, em Manaíra\nBairro: Manaíra, 400 m da praia\nValor: R$ 729.000\n\nÉ esse imóvel que te atende?',
+    ]);
+  });
+
+  it('ficha que já abre a última mensagem não é cortada: fotos antes dela', () => {
+    const msgs = ['Show! Separei umas fotos.', 'Cobertura duplex\nBairro: Cabo Branco\nValor: R$ 1.400.000\n\nÉ esse imóvel que te atende?'];
+    expect(intercalarMidias(msgs, [FOTO1])).toEqual([msgs[0], marcadorMidia(FOTO1), msgs[1]]);
+  });
+
   it('cumprimento + valor com ficha (saída real da Canda, 05/10): cumprimento → fotos → ficha', () => {
     const msgs = [
       'Bom dia, Carlos, tudo bem? Aqui é a Canda, assistente virtual da Costa & Muniz.',

@@ -50,25 +50,33 @@ export function midiasAdiadas(tools: ToolCallLog[]): string[] {
   return urls;
 }
 
+/** Frase de abertura que anuncia as fotos: um parágrafo de uma linha só, curto. */
+const MAX_ABERTURA = 160;
+
 /**
  * Põe as mídias antes da última mensagem: "Show! Separei umas fotos" → fotos →
  * ficha com a pergunta.
  *
- * Mensagem única com parágrafos (o modelo junta acolhida e ficha, visto em
- * 05/10 com `response_style: conciso`): divide no primeiro parágrafo e as fotos
- * entram entre ele e o resto. Mensagem única sem parágrafo: fotos depois dela.
- * Sem nenhuma mensagem, saem só as fotos.
+ * Se a última mensagem começa com uma frase curta de uma linha seguida de outro
+ * parágrafo ("Separei umas fotos pra você.\n\nCobertura...\nBairro: ..."), a
+ * frase fica antes das fotos e o resto depois. O modelo junta as duas numa
+ * mensagem só com `response_style: conciso` (visto em 05/10 nos dois jeitos:
+ * mensagem única e grudada na ficha). Mensagem única sem essa abertura: fotos
+ * depois dela. Sem nenhuma mensagem, saem só as fotos.
  */
 export function intercalarMidias(mensagens: string[], urls: string[]): string[] {
   if (urls.length === 0) return mensagens;
   const midias = urls.map(marcadorMidia);
   if (mensagens.length === 0) return midias;
-  if (mensagens.length === 1) {
-    const [primeiro, ...resto] = mensagens[0].split(/\n\s*\n/);
-    const depois = resto.join('\n\n').trim();
-    return depois ? [primeiro.trim(), ...midias, depois] : [mensagens[0], ...midias];
+  const anteriores = mensagens.slice(0, -1);
+  const ultima = mensagens[mensagens.length - 1];
+  const [primeiro, ...resto] = ultima.split(/\n\s*\n/);
+  const abertura = primeiro.trim();
+  if (resto.length > 0 && !abertura.includes('\n') && abertura.length <= MAX_ABERTURA) {
+    return [...anteriores, abertura, ...midias, resto.join('\n\n').trim()];
   }
-  return [...mensagens.slice(0, -1), ...midias, mensagens[mensagens.length - 1]];
+  if (mensagens.length === 1) return [ultima, ...midias];
+  return [...anteriores, ...midias, ultima];
 }
 
 /**
