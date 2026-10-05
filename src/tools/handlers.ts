@@ -1,8 +1,9 @@
 import axios from 'axios';
 import OpenAI from 'openai';
 import { config } from '../config';
-import { searchKnowledgeBase, getKbOpcoes } from '../services/supabase';
+import { searchKnowledgeBase, getKbOpcoes, getMidiaNoFluxo } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
+import { tipoPorExtensao } from '../agents/midia-no-fluxo';
 import { wrap, wrapError } from './envelope';
 import type { ExecutorInput } from '../types';
 
@@ -102,19 +103,6 @@ export async function handleAtualizarLeadCRM(
 
 // ── enviar_arquivo ────────────────────────────────────────────
 
-/**
- * Deduz o `type` que `/api/send-external` espera a partir da extensão do
- * arquivo. `enviar_arquivo` só recebe `file_url` — não tem esse dado pronto.
- */
-function tipoPorExtensao(fileUrl: string): 'image' | 'video' | 'audio' | 'document' {
-  const semQuery = fileUrl.split('?')[0].toLowerCase();
-  const ext = semQuery.slice(semQuery.lastIndexOf('.') + 1);
-  if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return 'image';
-  if (['mp4', 'mov', 'webm', '3gp'].includes(ext)) return 'video';
-  if (['mp3', 'ogg', 'opus', 'wav', 'm4a', 'aac'].includes(ext)) return 'audio';
-  return 'document';
-}
-
 export async function handleEnviarArquivo(
   args: { file_url: string },
   ctx: Pick<ExecutorInput, 'agent_id' | 'conversation_id' | 'contact_phone' | 'deadline'>
@@ -122,6 +110,11 @@ export async function handleEnviarArquivo(
   if (ctx.deadline?.expired()) {
     console.warn('[Tool] enviar_arquivo abortado — orçamento do turno esgotado');
     return wrapError(ORCAMENTO_ESGOTADO, { file_url: args.file_url });
+  }
+  // Mídia no fluxo (agents/midia-no-fluxo.ts): não manda agora. O orquestrador põe
+  // a foto entre as mensagens do turno e o n8n entrega tudo em ordem.
+  if (await getMidiaNoFluxo(ctx.agent_id)) {
+    return wrap({ success: true, adiado: true, sai_com_a_resposta: true }, { file_url: args.file_url }, 200);
   }
   try {
     // `enviar_arquivo` apontava para a Supabase Function `send-media`,

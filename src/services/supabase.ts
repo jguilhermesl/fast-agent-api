@@ -525,6 +525,27 @@ export async function getKbOpcoes(agentId: string): Promise<KbOpcoes> {
   return opcoes;
 }
 
+/**
+ * `agents.prompt_config.midia_no_fluxo === true`: o `enviar_arquivo` não manda a
+ * mídia na hora, ela sai entre as mensagens do turno (agents/midia-no-fluxo.ts).
+ * Falha de leitura vale `false`, o comportamento antigo (manda na hora).
+ */
+const midiaNoFluxoCache = new Map<string, { em: number; ligado: boolean }>();
+
+export async function getMidiaNoFluxo(agentId: string): Promise<boolean> {
+  const cache = midiaNoFluxoCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.ligado;
+  let ligado = false;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    ligado = (ag?.prompt_config as { midia_no_fluxo?: unknown } | null)?.midia_no_fluxo === true;
+  } catch (err) {
+    console.error('[Mídia] prompt_config não lido, manda na hora:', err instanceof Error ? err.message : String(err));
+  }
+  midiaNoFluxoCache.set(agentId, { em: Date.now(), ligado });
+  return ligado;
+}
+
 // ── Estilo de resposta do agente ──────────────────────────────
 
 /**

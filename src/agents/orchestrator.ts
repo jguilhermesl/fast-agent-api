@@ -21,6 +21,7 @@ import {
   getBufferDelayMs,
 } from '../services/supabase';
 import { runExecutor } from './executor';
+import { midiasAdiadas, intercalarMidias, paraHistorico } from './midia-no-fluxo';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
@@ -727,9 +728,16 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     console.error(`[Rajada] conversation=${req.conversation_id} pendente não gravado, turno responde normal`);
   }
 
+  // Mídia no fluxo (agents/midia-no-fluxo.ts): fotos que o `enviar_arquivo` deixou
+  // para a resposta entram antes da última mensagem; o n8n manda tudo em ordem.
+  const midias = midiasAdiadas(result.executorTrace.tools_called);
+  if (midias.length > 0) {
+    parsed = { ...parsed, mensagens: intercalarMidias(parsed.mensagens, midias) };
+  }
+
   // Atualiza histórico Redis — salva o texto limpo das mensagens, não o JSON bruto.
   // Isso evita que o modelo veja JSON estrutural no histórico em vez de linguagem natural.
-  const assistantContent = parsed.mensagens.join('\n');
+  const assistantContent = paraHistorico(parsed.mensagens);
   const toolsUsed = result.executorTrace.called ? toolsDoTurno : undefined;
   await appendHistory(scopedClientId, [
     { role: 'user',      content: historyPrefix(req.client_message_type) + req.client_messages },

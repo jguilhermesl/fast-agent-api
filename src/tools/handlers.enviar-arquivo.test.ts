@@ -23,12 +23,32 @@ vi.mock('../config', () => ({
   },
 }));
 
+// `prompt_config.midia_no_fluxo` do agente: desligado nos testes de envio na hora.
+vi.mock('../services/supabase', () => ({
+  searchKnowledgeBase: vi.fn(),
+  getKbOpcoes: vi.fn(),
+  getMidiaNoFluxo: vi.fn().mockResolvedValue(false),
+}));
+
 import { handleEnviarArquivo } from './handlers';
+import { getMidiaNoFluxo } from '../services/supabase';
 
 describe('handleEnviarArquivo', () => {
   beforeEach(() => {
     vi.mocked(axios.post).mockReset();
     vi.mocked(axios.isAxiosError).mockReturnValue(false);
+    vi.mocked(getMidiaNoFluxo).mockResolvedValue(false);
+  });
+
+  it('mídia no fluxo ligada: não envia agora, devolve ok com adiado', async () => {
+    vi.mocked(getMidiaNoFluxo).mockResolvedValue(true);
+
+    const r = JSON.parse(await handleEnviarArquivo({ file_url: 'https://cdn.exemplo.com/foto.jpg' }, ctx));
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(r.status).toBe('ok');
+    expect(r.data.adiado).toBe(true);
+    expect(r.query_echo.file_url).toBe('https://cdn.exemplo.com/foto.jpg');
   });
 
   const ctx = {

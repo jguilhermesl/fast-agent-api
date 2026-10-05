@@ -53,6 +53,11 @@ Estado das chaves no Railway (conferido em 30/09/2026):
   ferramenta com efeito (agendar, `enviar_*`, encerrar), sem lock da fila ou depois de 2 descartes seguidos.
   Decisão em `interaction_logs.payload.logs.turno.rajada` e no log `[Rajada]`. `RAJADA_MODE=log` só decide e
   loga; `off` desliga (env no Railway, sem mexer no código).
+- **Mídia no fluxo** (`src/agents/midia-no-fluxo.ts`, 05/10/2026): com `prompt_config.midia_no_fluxo: true`, o
+  `enviar_arquivo` não manda na hora (mandava dentro do `/api/chat`, então a foto chegava antes do texto do turno).
+  A foto volta em `mensagens` como `[[midia:<url>]]` **antes da última mensagem**, o n8n manda em ordem e o
+  `/api/send-external` converte o marcador em mídia (com 1,5 s de pausa depois). No Redis o marcador vira
+  `[Imagem]`. Sem a chave, nada muda. Primeiro agente: Canda (Costa & Muniz).
 - Mudou algo aqui: testes (`npm test`), push, `/api/version`, e suíte da Duda antes e depois. A suíte é paga
   (~US$ 0,08 por conversa-repetição): pergunte ao dono com o valor.
 

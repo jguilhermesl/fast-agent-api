@@ -12,6 +12,12 @@ import {
 } from '../services/supabase';
 import { getAdapter } from '../adapters/messaging';
 import { appendHistory } from '../memory/redis';
+import { lerMarcador, tipoPorExtensao } from '../agents/midia-no-fluxo';
+
+// Depois de uma mídia do fluxo, segura a resposta um pouco: o n8n só manda a
+// próxima mensagem quando esta volta, e foto leva mais tempo que texto para
+// chegar ao WhatsApp. Sem a pausa a ficha poderia passar na frente da foto.
+const PAUSA_DEPOIS_DA_MIDIA_MS = 1500;
 
 export const sendExternalRouter = Router();
 
@@ -59,7 +65,17 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
     return;
   }
 
-  const { conversation_id, agent_id, phone: bodyPhone, content, type, media_url } = parsed.data;
+  const { conversation_id, agent_id, phone: bodyPhone } = parsed.data;
+  let { content, type, media_url } = parsed.data;
+
+  // Mídia no fluxo (agents/midia-no-fluxo.ts): o /api/chat devolve a foto como
+  // mensagem `[[midia:<url>]]` e o n8n manda tudo como texto. Aqui ela vira mídia.
+  const midiaDoFluxo = type === 'text' ? lerMarcador(content) : null;
+  if (midiaDoFluxo) {
+    type = tipoPorExtensao(midiaDoFluxo);
+    media_url = midiaDoFluxo;
+    content = '';
+  }
   const isMediaType = type && type !== 'text';
 
   if (!content && !isMediaType) {
@@ -203,8 +219,10 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
       }
 
       console.log(
-        `[send-external] ✅ Sent msg=${messageId ?? 'no-persist'} conv=${resolvedConvId ?? 'first-contact'} provider=${channel.provider} provider_id=${result.providerMessageId}`,
+        `[send-external] ✅ Sent msg=${messageId ?? 'no-persist'} conv=${resolvedConvId ?? 'first-contact'} provider=${channel.provider} provider_id=${result.providerMessageId}${midiaDoFluxo ? ' midia_do_fluxo' : ''}`,
       );
+
+      if (midiaDoFluxo) await new Promise((r) => setTimeout(r, PAUSA_DEPOIS_DA_MIDIA_MS));
 
       res.json({ ok: true, message_id: messageId, status: 'sent', provider_message_id: result.providerMessageId });
     } else {
