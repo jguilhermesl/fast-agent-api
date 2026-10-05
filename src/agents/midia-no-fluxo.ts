@@ -52,13 +52,22 @@ export function midiasAdiadas(tools: ToolCallLog[]): string[] {
 
 /**
  * Põe as mídias antes da última mensagem: "Show! Separei umas fotos" → fotos →
- * ficha com a pergunta. Com uma mensagem só, as fotos vão depois dela; sem
- * nenhuma, saem só as fotos.
+ * ficha com a pergunta.
+ *
+ * Mensagem única com parágrafos (o modelo junta acolhida e ficha, visto em
+ * 05/10 com `response_style: conciso`): divide no primeiro parágrafo e as fotos
+ * entram entre ele e o resto. Mensagem única sem parágrafo: fotos depois dela.
+ * Sem nenhuma mensagem, saem só as fotos.
  */
 export function intercalarMidias(mensagens: string[], urls: string[]): string[] {
   if (urls.length === 0) return mensagens;
   const midias = urls.map(marcadorMidia);
-  if (mensagens.length <= 1) return [...mensagens, ...midias];
+  if (mensagens.length === 0) return midias;
+  if (mensagens.length === 1) {
+    const [primeiro, ...resto] = mensagens[0].split(/\n\s*\n/);
+    const depois = resto.join('\n\n').trim();
+    return depois ? [primeiro.trim(), ...midias, depois] : [mensagens[0], ...midias];
+  }
   return [...mensagens.slice(0, -1), ...midias, mensagens[mensagens.length - 1]];
 }
 

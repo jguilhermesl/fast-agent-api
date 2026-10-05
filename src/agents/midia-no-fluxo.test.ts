@@ -86,8 +86,28 @@ describe('intercalarMidias', () => {
     expect(intercalarMidias(msgs, [FOTO1])).toEqual([msgs[0], msgs[1], marcadorMidia(FOTO1), msgs[2]]);
   });
 
-  it('uma mensagem só: fotos depois dela', () => {
+  it('uma mensagem só, sem parágrafo: fotos depois dela', () => {
     expect(intercalarMidias(['Ficha'], [FOTO1])).toEqual(['Ficha', marcadorMidia(FOTO1)]);
+  });
+
+  it('uma mensagem só com acolhida e ficha (saída real da Canda, 05/10): fotos entre as duas', () => {
+    const unica =
+      'A Costa & Muniz tem assessoria de crédito, o corretor te ajuda nisso. Separei umas fotos da cobertura pra você.\n\n' +
+      'Cobertura duplex em Cabo Branco\nBairro: Cabo Branco, 50 m da orla\nValor: R$ 1.400.000\n\nÉ esse imóvel que te atende?';
+    expect(intercalarMidias([unica], [FOTO1, FOTO2])).toEqual([
+      'A Costa & Muniz tem assessoria de crédito, o corretor te ajuda nisso. Separei umas fotos da cobertura pra você.',
+      marcadorMidia(FOTO1),
+      marcadorMidia(FOTO2),
+      'Cobertura duplex em Cabo Branco\nBairro: Cabo Branco, 50 m da orla\nValor: R$ 1.400.000\n\nÉ esse imóvel que te atende?',
+    ]);
+  });
+
+  it('cumprimento + valor com ficha (saída real da Canda, 05/10): cumprimento → fotos → ficha', () => {
+    const msgs = [
+      'Bom dia, Carlos, tudo bem? Aqui é a Canda, assistente virtual da Costa & Muniz.',
+      'O apartamento novo em Manaíra está anunciado por R$ 729.000.\nBairro: Manaíra\nValor: R$ 729.000\n\nÉ esse imóvel que te atende?',
+    ];
+    expect(intercalarMidias(msgs, [FOTO1])).toEqual([msgs[0], marcadorMidia(FOTO1), msgs[1]]);
   });
 
   it('sem texto: só as fotos', () => {
