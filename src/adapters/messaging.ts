@@ -394,6 +394,79 @@ export async function zapiSend(
   }
 }
 
+// ── GPT Maker Adapter ──────────────────────────────────────────
+
+/**
+ * Número oficial (Cloud API) conectado no GPT Maker. A entrada chega no messaging-gateway por
+ * um agente FORWARD desligado no GPT Maker; a saída vai pela API dele:
+ * POST /v2/chat/{channelId}-{telefone}/send-message (o chatId do GPT Maker é canal-telefone).
+ *
+ * - Devolve só `{success}`, sem id. O eco volta pelo forward e o gateway casa por conteúdo
+ *   (`acharEcoDaPlataforma`, chat-flow-pilot-63/supabase/functions/_shared/gptmaker-forward.ts).
+ * - Fora da janela de 24h a Meta aceita e não entrega (medido 14/09/2026): é limite do canal.
+ * - O canal guarda só `channel_id`. O token é do WORKSPACE inteiro do GPT Maker (todos os
+ *   clientes) e mora só na variável `GPTMAKER_TOKEN` do Railway: `channels.credentials` é
+ *   legível por usuário do tenant (policy "Tenant users can view their channels").
+ * Primeiro canal: Canda (Costa & Muniz), 05/10/2026.
+ */
+export async function gptmakerSend(
+  credentials: Record<string, string>,
+  params: SendMessageParams,
+): Promise<AdapterResult> {
+  const token = process.env.GPTMAKER_TOKEN;
+  const canal = credentials.channel_id;
+  if (!token) return { success: false, error: 'GPT Maker: variável GPTMAKER_TOKEN ausente no servidor' };
+  if (!canal) return { success: false, error: 'GPT Maker: canal sem channel_id' };
+  const fone = String(params.phone || '').replace(/\D/g, '');
+  if (!fone) return { success: false, error: 'GPT Maker: telefone vazio' };
+
+  const tipo = String(params.type || 'text').toLowerCase();
+  let body: Record<string, unknown>;
+  if (params.mediaUrl && tipo !== 'text') {
+    switch (tipo) {
+      case 'audio':
+      case 'ptt':
+        body = { audio: params.mediaUrl };
+        break;
+      case 'video':
+        body = { video: params.mediaUrl };
+        break;
+      case 'document': {
+        const nome = decodeURIComponent(params.mediaUrl.split('?')[0].split('/').pop() || '') || 'documento';
+        body = { document: params.mediaUrl, documentName: nome };
+        break;
+      }
+      default:
+        body = { image: params.mediaUrl, ...(params.content ? { message: params.content } : {}) };
+    }
+  } else {
+    if (!params.content) return { success: false, error: 'GPT Maker: mensagem vazia' };
+    body = { message: params.content };
+  }
+
+  try {
+    const res = await axios.post(
+      `https://api.gptmaker.ai/v2/chat/${canal}-${fone}/send-message`,
+      body,
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 30_000 },
+    );
+    const data = (res.data ?? {}) as Record<string, unknown>;
+    if (data.success === false || data.error) {
+      return { success: false, error: `GPT Maker recusou: ${String(data.error ?? data.message ?? 'sem detalhe')}` };
+    }
+    return { success: true };
+  } catch (e: unknown) {
+    if (axios.isAxiosError(e)) {
+      const status = e.response?.status;
+      const detalhe = (e.response?.data as Record<string, unknown> | undefined)?.message ?? e.message;
+      console.error(`[GPT Maker] ❌ envio falhou status=${status} canal=${canal.slice(0, 8)}*** fone=${fone} tipo=${tipo}: ${String(detalhe)}`);
+      return { success: false, error: `GPT Maker HTTP ${status ?? 'sem resposta'}: ${String(detalhe)}` };
+    }
+    console.error('[GPT Maker] ❌ envio falhou:', String(e));
+    return { success: false, error: String(e) };
+  }
+}
+
 // ── Adapter selector ───────────────────────────────────────────
 
 export type AdapterFn = (
@@ -408,6 +481,9 @@ export function getAdapter(provider: string): AdapterFn {
   }
   if (provider === 'zapi') {
     return zapiSend;
+  }
+  if (provider === 'gptmaker') {
+    return (creds, params) => gptmakerSend(creds, params);
   }
   throw new Error(`Unknown provider: ${provider}`);
 }
