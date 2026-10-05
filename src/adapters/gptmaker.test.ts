@@ -58,6 +58,18 @@ describe('gptmakerSend', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it('400 de chat inexistente mostra o motivo do GPT Maker', async () => {
+    const err = Object.assign(new Error('Request failed with status code 400'), {
+      isAxiosError: true,
+      response: { status: 400, data: { error: 'No value present' } },
+    });
+    vi.spyOn(axios, 'post').mockRejectedValue(err);
+    vi.spyOn(axios, 'isAxiosError').mockReturnValue(true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const r = await gptmakerSend(CREDS, { phone: '558390000001', content: 'oi' });
+    expect(r).toEqual({ success: false, error: 'GPT Maker HTTP 400: No value present' });
+  });
+
   it('{success:false} do GPT Maker vira falha', async () => {
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { success: false, message: 'chat não encontrado' } });
     const r = await gptmakerSend(CREDS, { phone: '558199990000', content: 'oi' });

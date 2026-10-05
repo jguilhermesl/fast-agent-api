@@ -458,7 +458,10 @@ export async function gptmakerSend(
   } catch (e: unknown) {
     if (axios.isAxiosError(e)) {
       const status = e.response?.status;
-      const detalhe = (e.response?.data as Record<string, unknown> | undefined)?.message ?? e.message;
+      // O GPT Maker manda o motivo em `error` ("No value present" = chat inexistente: o contato
+      // nunca escreveu para o número).
+      const corpo = e.response?.data as Record<string, unknown> | undefined;
+      const detalhe = corpo?.error ?? corpo?.message ?? e.message;
       console.error(`[GPT Maker] ❌ envio falhou status=${status} canal=${canal.slice(0, 8)}*** fone=${fone} tipo=${tipo}: ${String(detalhe)}`);
       return { success: false, error: `GPT Maker HTTP ${status ?? 'sem resposta'}: ${String(detalhe)}` };
     }
