@@ -6,6 +6,7 @@ import { entrarNaFila, sairDaFila, TURN_LOCK_WAIT_MS, type Vez } from '../memory
 import { detectarCruzamento, comNotaDeCruzamento, type MotivoCruzamento } from './cruzamento';
 import { cumprimentoDeveCalar } from './saudacao-espera';
 import { decidirRajada, ehConversaReal, juntarComPendente, type DecisaoRajada } from './rajada';
+import { turnoComecaComAtendente } from './atendente-assumiu';
 import {
   saveTokenUsage,
   buildTokenLogEntry,
@@ -435,6 +436,26 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         juntouPendente = true;
         descartesAnteriores = j.descartes;
         console.log(`[Rajada] conversation=${req.conversation_id} juntou o texto do turno descartado (descartes=${j.descartes}, idade=${Date.now() - pendente.em}ms)`);
+      }
+    }
+  }
+
+  // Conversa já na equipe quando o turno começa (agents/atendente-assumiu.ts): não
+  // chama LLM nem ferramenta. Guarda a fala do cliente, como a rajada faz.
+  if (config.atendenteNoInicioMode !== 'off' && ehConversaReal(req.conversation_id)) {
+    let comAtendente = false;
+    try {
+      comAtendente = turnoComecaComAtendente(await getEstadoDoLead(req.conversation_id));
+    } catch (err) {
+      console.error('[Atendente] leitura do lead falhou, turno segue:', err instanceof Error ? err.message : String(err));
+    }
+    if (comAtendente) {
+      console.log(`[Atendente] conversation=${req.conversation_id} conversa com a equipe no início do turno modo=${config.atendenteNoInicioMode}`);
+      if (config.atendenteNoInicioMode === 'calar') {
+        await appendHistory(scopedClientId, [
+          { role: 'user', content: historyPrefix(req.client_message_type) + req.client_messages },
+        ]);
+        return { ...makeFallback([]), mensagens: [], redirect_human: false, transfer_reason: undefined };
       }
     }
   }

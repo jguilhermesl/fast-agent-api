@@ -30,6 +30,17 @@ export function ehFalaDaAtendente(m: MensagemDaConversa): boolean {
   return TIPOS_DE_FALA.has(m.message_type ?? '');
 }
 
+/**
+ * Turno que já começa com a conversa na equipe. O n8n confere `handled_by` quando a
+ * mensagem chega e só de novo depois do LLM; no meio há a espera do buffer (15 s na
+ * Duda). Se a IA transfere ou a atendente assume nessa espera, o turno rodava inteiro
+ * (gasto e ferramenta com efeito, como o `encerrar_conversa` de 08/10 14:06:49) para
+ * o `Filtro_Inicial2` barrar no fim. Aqui o turno nem começa.
+ */
+export function turnoComecaComAtendente(lead: EstadoDoLead | null): boolean {
+  return lead?.handled_by === 'human';
+}
+
 export function atendenteAssumiu(
   lead: EstadoDoLead | null,
   msgs: MensagemDaConversa[],

@@ -48,6 +48,12 @@ export const config = {
     ? process.env.RAJADA_MODE
     : 'descartar') as 'descartar' | 'log' | 'off',
 
+  // Turno que começa com a conversa já na equipe (src/agents/atendente-assumiu.ts).
+  // `calar` (padrão) não chama o LLM nem ferramenta; `log` só loga; `off` nem consulta.
+  atendenteNoInicioMode: (['log', 'off'].includes(process.env.ATENDENTE_NO_INICIO_MODE ?? '')
+    ? process.env.ATENDENTE_NO_INICIO_MODE
+    : 'calar') as 'calar' | 'log' | 'off',
+
   // A tabela de tarifas saiu daqui para `src/services/pricing.ts`, que espelha o
   // `llm_pricing` do Supabase e roda em teste sem env var. Enquanto morava neste
   // objeto, `gpt-5.4-mini` era cobrado na tarifa do `gpt-5.4` e ninguém tinha

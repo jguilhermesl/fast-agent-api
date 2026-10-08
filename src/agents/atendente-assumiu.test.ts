@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { atendenteAssumiu, ehFalaDaAtendente, JANELA_ATENDENTE_MS } from './atendente-assumiu';
+import { atendenteAssumiu, ehFalaDaAtendente, turnoComecaComAtendente, JANELA_ATENDENTE_MS } from './atendente-assumiu';
 import type { EstadoDoLead, MensagemDaConversa } from './rajada';
 
 const ms = (iso: string) => new Date(iso).getTime();
@@ -63,5 +63,25 @@ describe('atendenteAssumiu', () => {
   it('created_at inválido é ignorado', () => {
     const msgs = [equipe('ontem', 'Oi')];
     expect(atendenteAssumiu(lead('human'), msgs, ms('2026-10-08T16:47:24.800Z'))).toBe(false);
+  });
+});
+
+describe('turnoComecaComAtendente', () => {
+  // Conversa final 0838, 08/10/2026: o turno do "Ok aguardo" entrou às 14:06:30 com o lead em ai, esperou 15 s
+  // e começou com o lead já transferido (14:06:32). Rodou e chamou encerrar_conversa às 14:06:49.
+  it('caso LP 08/10 14:06: lead transferido durante a espera do buffer: não roda', () => {
+    expect(turnoComecaComAtendente(lead('human', 'pending'))).toBe(true);
+  });
+
+  it('lead com a IA: roda', () => {
+    expect(turnoComecaComAtendente(lead('ai'))).toBe(false);
+  });
+
+  it('pending com handled_by ai (devolução em curso): roda, como antes', () => {
+    expect(turnoComecaComAtendente(lead('ai', 'pending'))).toBe(false);
+  });
+
+  it('lead ilegível: roda (falha aberta)', () => {
+    expect(turnoComecaComAtendente(null)).toBe(false);
   });
 });
