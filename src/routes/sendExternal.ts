@@ -5,6 +5,8 @@ import {
   getConversationContext,
   getConversationContextByPhone,
   getChannelByAgentId,
+  getEstadoDoLead,
+  getMensagensDaConversa,
   insertMessage,
   updateMessageStatus,
   updateLeadLastMessageAt,
@@ -13,6 +15,7 @@ import {
 import { getAdapter } from '../adapters/messaging';
 import { appendHistory } from '../memory/redis';
 import { lerMarcador, tipoPorExtensao } from '../agents/midia-no-fluxo';
+import { atendenteAssumiu, JANELA_ATENDENTE_MS } from '../agents/atendente-assumiu';
 
 // Depois de uma mídia do fluxo, segura a resposta um pouco: o n8n só manda a
 // próxima mensagem quando esta volta, e foto leva mais tempo que texto para
@@ -112,6 +115,25 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
   if (!targetPhone) {
     res.status(400).json({ error: 'No phone number available' });
     return;
+  }
+
+  // ── Atendente assumiu durante o envio (agents/atendente-assumiu.ts) ──
+  // Só a resposta da IA pelo AGENTE BASE pede esta trava. Erro de leitura envia (falha aberta).
+  if (req.headers['x-segurar-se-atendente'] === 'true' && conv?.id) {
+    try {
+      const agora = Date.now();
+      const [estado, msgs] = await Promise.all([
+        getEstadoDoLead(conv.id),
+        getMensagensDaConversa(conv.id, new Date(agora - JANELA_ATENDENTE_MS).toISOString(), new Date(agora + 5_000).toISOString()),
+      ]);
+      if (atendenteAssumiu(estado, msgs, agora)) {
+        console.log(`[send-external] ✋ Segurada: atendente assumiu conv=${conv.id}`);
+        res.json({ ok: true, blocked: true, reason: 'atendente_assumiu', message_id: null, status: 'blocked' });
+        return;
+      }
+    } catch (e: unknown) {
+      console.error('[send-external] trava de atendente falhou, enviando:', e instanceof Error ? e.message : String(e));
+    }
   }
 
   // ── Build attachments array ──────────────────────────────────
