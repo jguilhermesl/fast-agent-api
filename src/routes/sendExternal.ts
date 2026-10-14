@@ -7,6 +7,7 @@ import {
   getChannelByAgentId,
   getEstadoDoLead,
   getMensagensDaConversa,
+  getUltimasMensagensDaConversa,
   insertMessage,
   updateMessageStatus,
   updateLeadLastMessageAt,
@@ -15,7 +16,7 @@ import {
 import { getAdapter } from '../adapters/messaging';
 import { appendHistory } from '../memory/redis';
 import { lerMarcador, tipoPorExtensao } from '../agents/midia-no-fluxo';
-import { atendenteAssumiu, JANELA_ATENDENTE_MS } from '../agents/atendente-assumiu';
+import { atendenteAssumiu, equipeFalouDepoisDoCliente, JANELA_ATENDENTE_MS, JANELA_TURNO_MS } from '../agents/atendente-assumiu';
 
 // Depois de uma mídia do fluxo, segura a resposta um pouco: o n8n só manda a
 // próxima mensagem quando esta volta, e foto leva mais tempo que texto para
@@ -118,17 +119,22 @@ sendExternalRouter.post('/', authMiddleware, async (req: Request, res: Response)
   }
 
   // ── Atendente assumiu durante o envio (agents/atendente-assumiu.ts) ──
-  // Só a resposta da IA pelo AGENTE BASE pede esta trava. Erro de leitura envia (falha aberta).
+  // Pedem esta trava: resposta do AGENTE BASE, follow-up, texto fixo e enviar_arquivo.
+  // Erro de leitura envia (falha aberta).
   if (req.headers['x-segurar-se-atendente'] === 'true' && conv?.id) {
     try {
       const agora = Date.now();
-      const [estado, msgs] = await Promise.all([
+      const [estado, msgs, ultimas] = await Promise.all([
         getEstadoDoLead(conv.id),
         getMensagensDaConversa(conv.id, new Date(agora - JANELA_ATENDENTE_MS).toISOString(), new Date(agora + 5_000).toISOString()),
+        getUltimasMensagensDaConversa(conv.id, new Date(agora - JANELA_TURNO_MS).toISOString()),
       ]);
-      if (atendenteAssumiu(estado, msgs, agora)) {
-        console.log(`[send-external] ✋ Segurada: atendente assumiu conv=${conv.id}`);
-        res.json({ ok: true, blocked: true, reason: 'atendente_assumiu', message_id: null, status: 'blocked' });
+      const reason = atendenteAssumiu(estado, msgs, agora)
+        ? 'atendente_assumiu'
+        : equipeFalouDepoisDoCliente(ultimas, agora) ? 'equipe_falou_depois_do_cliente' : null;
+      if (reason) {
+        console.log(`[send-external] ✋ Segurada: ${reason} conv=${conv.id}`);
+        res.json({ ok: true, blocked: true, reason, message_id: null, status: 'blocked' });
         return;
       }
     } catch (e: unknown) {

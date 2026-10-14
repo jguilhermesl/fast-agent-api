@@ -137,6 +137,8 @@ export async function handleEnviarArquivo(
         headers: {
           Authorization: `Bearer ${config.apiSecret}`,
           'Content-Type': 'application/json',
+          // Não manda o arquivo se a equipe já respondeu o cliente (agents/atendente-assumiu.ts).
+          'x-segurar-se-atendente': 'true',
         },
         timeout: capTimeout(15_000, ctx.deadline),
       }

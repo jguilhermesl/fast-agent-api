@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { atendenteAssumiu, ehFalaDaAtendente, turnoComecaComAtendente, JANELA_ATENDENTE_MS } from './atendente-assumiu';
+import { atendenteAssumiu, ehFalaDaAtendente, equipeFalouDepoisDoCliente, turnoComecaComAtendente, JANELA_ATENDENTE_MS, JANELA_TURNO_MS } from './atendente-assumiu';
 import type { EstadoDoLead, MensagemDaConversa } from './rajada';
 
 const ms = (iso: string) => new Date(iso).getTime();
@@ -83,5 +83,54 @@ describe('turnoComecaComAtendente', () => {
 
   it('lead ilegível: roda (falha aberta)', () => {
     expect(turnoComecaComAtendente(null)).toBe(false);
+  });
+});
+
+describe('equipeFalouDepoisDoCliente', () => {
+  // 14/10/2026, Duda, 558182716801: cliente 17:09:21/17:09:30, atendente 17:09:51, IA 17:09:56.
+  const VERA = [
+    ia('2026-10-14T03:34:37Z', 'De nada, Vera'),
+    inb('2026-10-14T20:09:21Z', 'Não posso ir amanhã'),
+    inb('2026-10-14T20:09:30Z', 'Obrigada!!!'),
+    equipe('2026-10-14T20:09:51Z', 'Próxima semana terei: ...'),
+  ];
+
+  it('segura com o lead ainda em ai quando a equipe respondeu depois da última fala do cliente', () => {
+    expect(equipeFalouDepoisDoCliente(VERA, ms('2026-10-14T20:09:56Z'))).toBe(true);
+  });
+
+  it('não segura quando o cliente falou de novo depois da equipe', () => {
+    const msgs = [...VERA, inb('2026-10-14T20:12:00Z', 'Pode ser segunda')];
+    expect(equipeFalouDepoisDoCliente(msgs, ms('2026-10-14T20:12:20Z'))).toBe(false);
+  });
+
+  it('fala da própria IA, nota de sistema e mensagem gravada como AI não contam', () => {
+    const msgs = [
+      inb('2026-10-14T20:09:30Z', 'Obrigada!!!'),
+      sistema('2026-10-14T20:09:55Z', 'Motivo da transferência: x'),
+      ia('2026-10-14T20:09:56Z', 'Tudo bem, Vera.'),
+      ia('2026-10-14T20:09:57Z', 'Oi', 'AI'),
+    ];
+    expect(equipeFalouDepoisDoCliente(msgs, ms('2026-10-14T20:10:00Z'))).toBe(false);
+  });
+
+  it('mensagem do painel (sem from_device) também conta', () => {
+    const msgs = [inb('2026-10-14T20:09:30Z', 'Oi'), equipe('2026-10-14T20:09:40Z', 'Olá', false)];
+    expect(equipeFalouDepoisDoCliente(msgs, ms('2026-10-14T20:09:45Z'))).toBe(true);
+  });
+
+  it('follow-up: equipe falou depois da última fala do cliente, horas antes, ainda segura', () => {
+    const msgs = [inb('2026-10-14T12:00:00Z', 'Vou ver'), equipe('2026-10-14T12:05:00Z', 'Fico no aguardo')];
+    expect(equipeFalouDepoisDoCliente(msgs, ms('2026-10-14T18:00:00Z'))).toBe(true);
+  });
+
+  it('fala da equipe mais velha que a janela não segura', () => {
+    const agora = ms('2026-10-14T20:00:00Z');
+    const msgs = [equipe(new Date(agora - JANELA_TURNO_MS - 1000).toISOString(), 'Oi')];
+    expect(equipeFalouDepoisDoCliente(msgs, agora)).toBe(false);
+  });
+
+  it('conversa sem mensagem não segura', () => {
+    expect(equipeFalouDepoisDoCliente([], ms('2026-10-14T20:00:00Z'))).toBe(false);
   });
 });

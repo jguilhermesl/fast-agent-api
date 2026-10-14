@@ -176,6 +176,38 @@ export async function getMensagensDaConversa(
 }
 
 /** Dono e status da conversa agora (`leads.id` = `conversation_id`). */
+/**
+ * As últimas mensagens da conversa (mais novas), em ordem cronológica. Serve para
+ * achar a última fala do cliente e o que veio depois dela; o `.limit` com ordem
+ * crescente de `getMensagensDaConversa` devolveria as mais velhas da janela.
+ */
+export async function getUltimasMensagensDaConversa(
+  conversationId: string,
+  desdeIso: string,
+  limite = 40
+): Promise<MensagemDaConversa[]> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('created_at, direction, message_type, content, sender_name, from_device:metadata->>from_device')
+    .eq('conversation_id', conversationId)
+    .gte('created_at', desdeIso)
+    .order('created_at', { ascending: false })
+    .limit(limite);
+
+  if (error) throw new Error(`getUltimasMensagensDaConversa: ${error.message}`);
+  return (data ?? []).reverse().map((m) => {
+    const r = m as Record<string, unknown>;
+    return {
+      created_at: String(r.created_at),
+      direction: String(r.direction ?? ''),
+      message_type: (r.message_type as string | null) ?? null,
+      content: (r.content as string | null) ?? null,
+      sender_name: (r.sender_name as string | null) ?? null,
+      from_device: r.from_device === true || r.from_device === 'true',
+    };
+  });
+}
+
 export async function getEstadoDoLead(conversationId: string): Promise<EstadoDoLead | null> {
   const { data, error } = await supabase
     .from('leads')

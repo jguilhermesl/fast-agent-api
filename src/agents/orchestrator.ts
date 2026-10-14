@@ -6,7 +6,7 @@ import { entrarNaFila, sairDaFila, TURN_LOCK_WAIT_MS, type Vez } from '../memory
 import { detectarCruzamento, comNotaDeCruzamento, type MotivoCruzamento } from './cruzamento';
 import { cumprimentoDeveCalar } from './saudacao-espera';
 import { decidirRajada, ehConversaReal, juntarComPendente, type DecisaoRajada } from './rajada';
-import { turnoComecaComAtendente } from './atendente-assumiu';
+import { equipeFalouDepoisDoCliente, JANELA_TURNO_MS, turnoComecaComAtendente } from './atendente-assumiu';
 import {
   saveTokenUsage,
   buildTokenLogEntry,
@@ -19,6 +19,7 @@ import {
   getEstiloResposta,
   getMensagensDaConversa,
   getEstadoDoLead,
+  getUltimasMensagensDaConversa,
   getBufferDelayMs,
 } from '../services/supabase';
 import { runExecutor } from './executor';
@@ -445,7 +446,14 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   if (config.atendenteNoInicioMode !== 'off' && ehConversaReal(req.conversation_id)) {
     let comAtendente = false;
     try {
-      comAtendente = turnoComecaComAtendente(await getEstadoDoLead(req.conversation_id));
+      // Lead em `human`, ou a equipe já respondeu a última fala do cliente com o lead
+      // ainda em `ai` (eco atrasado ou em outra conversa, 14/10/2026).
+      const agora = Date.now();
+      const [estado, ultimas] = await Promise.all([
+        getEstadoDoLead(req.conversation_id),
+        getUltimasMensagensDaConversa(req.conversation_id, new Date(agora - JANELA_TURNO_MS).toISOString()),
+      ]);
+      comAtendente = turnoComecaComAtendente(estado) || equipeFalouDepoisDoCliente(ultimas, agora);
     } catch (err) {
       console.error('[Atendente] leitura do lead falhou, turno segue:', err instanceof Error ? err.message : String(err));
     }

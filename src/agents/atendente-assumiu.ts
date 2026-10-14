@@ -7,10 +7,9 @@
 // (Duda, 14 dias): 3 conversas com a IA falando 0,3 a 4 s depois da atendente
 // (ex.: 08/10 13:47:20 atendente, 13:47:24 IA).
 //
-// Só vale para quem pede (header `x-segurar-se-atendente: true`, mandado pelo nó
-// "[API] Send external message" do AGENTE BASE). O /api/send-external também leva
-// aviso de transferência para o número da equipe, texto fixo e follow-up: esses
-// não passam por aqui.
+// Só vale para quem pede (header `x-segurar-se-atendente: true`): o nó "[API] Send
+// external message" do AGENTE BASE, o envio do FOLLOW UP, os textos fixos do n8n e o
+// `enviar_arquivo`. O aviso de transferência para o número da equipe não pede.
 //
 // A transferência da própria IA ("Um momento, vou passar para a equipe") continua
 // saindo: o lead já está em `human`, mas nenhuma atendente escreveu ainda.
@@ -39,6 +38,34 @@ export function ehFalaDaAtendente(m: MensagemDaConversa): boolean {
  */
 export function turnoComecaComAtendente(lead: EstadoDoLead | null): boolean {
   return lead?.handled_by === 'human';
+}
+
+/** Até onde olhar para trás procurando a fala do cliente que deu origem ao turno. */
+export const JANELA_TURNO_MS = 24 * 3600_000;
+
+/**
+ * A equipe já respondeu a última fala do cliente: a IA não fala, seja qual for o
+ * `handled_by`. `atendenteAssumiu` exige o lead em `human`, e isso falha quando o
+ * eco do celular demora, cai em outra conversa ou ainda não foi gravado. Caso real
+ * de 14/10/2026 (Duda, 558182716801): a cliente escreveu 17:09:30, a atendente
+ * respondeu 17:09:51 e a IA falou 17:09:56, porque o eco veio com LID e foi para
+ * uma conversa fantasma; o lead real seguia em `ai`.
+ *
+ * Vale para resposta do turno, texto fixo, arquivo e follow-up: em todos, mensagem
+ * da equipe depois da última do cliente quer dizer que a equipe está atendendo.
+ */
+export function equipeFalouDepoisDoCliente(msgs: MensagemDaConversa[], agora: number): boolean {
+  let desde = agora - JANELA_TURNO_MS;
+  for (const m of msgs) {
+    if (m.direction !== 'inbound') continue;
+    const t = Date.parse(m.created_at);
+    if (Number.isFinite(t) && t > desde) desde = t;
+  }
+  return msgs.some((m) => {
+    if (!ehFalaDaAtendente(m)) return false;
+    const t = Date.parse(m.created_at);
+    return Number.isFinite(t) && t > desde;
+  });
 }
 
 export function atendenteAssumiu(
