@@ -93,3 +93,46 @@ export function paraHistorico(mensagens: string[]): string {
     })
     .join('\n');
 }
+
+/**
+ * Fotos de imóvel que a busca do turno trouxe e a resposta apresentou, mas que o modelo esqueceu de
+ * pedir pelo `enviar_arquivo` (16/10/2026, Canda): a acolhida dizia "Separei umas fotos", a ficha
+ * vinha com o link `/site/imovel/<ref>` e nenhuma foto saía. A busca (`buscar_imoveis`) já devolve
+ * `fotos` de cada imóvel; se a resposta cita o link de um deles e nenhuma foto dele está no turno,
+ * entram as dele (até `max`). Imóvel que a resposta não cita não ganha foto.
+ */
+export function fotosDaBuscaEsquecidas(
+  tools: ToolCallLog[],
+  mensagens: string[],
+  jaNoTurno: string[],
+  max = 2,
+): string[] {
+  const porRef = new Map<string, string[]>();
+  for (const t of tools) {
+    if (t.tool !== 'buscar_imoveis') continue;
+    for (const im of imoveisDoResultado(t.result)) {
+      const ref = String(im.link ?? '').match(/\/site\/imovel\/([^/?#\s]+)/)?.[1];
+      const fotos = Array.isArray(im.fotos) ? im.fotos.filter((u): u is string => typeof u === 'string' && /^https?:\/\//.test(u)) : [];
+      if (ref && fotos.length > 0 && !porRef.has(ref)) porRef.set(ref, fotos);
+    }
+  }
+  if (porRef.size === 0) return [];
+  const texto = mensagens.filter((m) => !lerMarcador(m)).join('\n');
+  const out: string[] = [];
+  for (const [ref, fotos] of porRef) {
+    const citado = texto.split(`/site/imovel/${ref}`).slice(1).some((depois) => !/^[\w-]/.test(depois));
+    if (!citado || fotos.some((u) => jaNoTurno.includes(u))) continue;
+    for (const u of fotos.slice(0, max)) if (!out.includes(u)) out.push(u);
+  }
+  return out;
+}
+
+type ImovelDaBusca = { link?: unknown; fotos?: unknown[] };
+
+/** A lista `imoveis` do retorno da busca, onde quer que o envelope do dispatcher a ponha. */
+function imoveisDoResultado(r: unknown, prof = 0): ImovelDaBusca[] {
+  if (!r || typeof r !== 'object' || prof > 4) return [];
+  const o = r as Record<string, unknown>;
+  if (Array.isArray(o.imoveis)) return o.imoveis.filter((x): x is ImovelDaBusca => !!x && typeof x === 'object');
+  return imoveisDoResultado(o.data, prof + 1);
+}

@@ -6,6 +6,7 @@ import {
   midiasAdiadas,
   intercalarMidias,
   paraHistorico,
+  fotosDaBuscaEsquecidas,
 } from './midia-no-fluxo';
 import type { ToolCallLog } from '../types';
 
@@ -144,5 +145,56 @@ describe('paraHistorico', () => {
     const texto = paraHistorico(['Show!', marcadorMidia(FOTO1), 'Ficha']);
     expect(texto).toBe('Show!\n[Imagem]\nFicha');
     expect(texto).not.toContain('https://');
+  });
+});
+
+describe('fotosDaBuscaEsquecidas (Canda, 16/10)', () => {
+  const B = 'https://crssvefklqsblyfesmzn.supabase.co/storage/v1/object/public/imoveis/tecimob';
+  // Envelope real do intent-dispatcher no turno que falhou (gostou_sem_teto, t3).
+  const busca: ToolCallLog = {
+    tool: 'buscar_imoveis',
+    arguments: { texto: 'apartamento em Manaíra para morar', bairro: 'Manaíra' },
+    result: {
+      status: 'ok',
+      data: {
+        success: true,
+        data: {
+          total: 10,
+          imoveis: [
+            { ref: '136192', link: 'https://costaemuniz-crm.lovable.app/site/imovel/136192', fotos: [`${B}/136192/1.jpg`, `${B}/136192/2.jpg`] },
+            { ref: '1361', link: 'https://costaemuniz-crm.lovable.app/site/imovel/1361', fotos: [`${B}/1361/1.jpg`] },
+            { ref: '167685', link: 'https://costaemuniz-crm.lovable.app/site/imovel/167685', fotos: [] },
+          ],
+        },
+      },
+    },
+  };
+  const resposta = [
+    'Separei umas fotos de um apartamento em Manaíra pra você.',
+    'Apartamento de 2 quartos em Manaíra\nValor: R$ 950.000\nMais fotos: https://costaemuniz-crm.lovable.app/site/imovel/136192\n\nÉ esse imóvel que te atende?',
+  ];
+
+  it('ficha com o link e nenhuma foto no turno: entram as 2 fotos do imóvel citado', () => {
+    expect(fotosDaBuscaEsquecidas([busca], resposta, [])).toEqual([`${B}/136192/1.jpg`, `${B}/136192/2.jpg`]);
+  });
+  it('ref que é prefixo de outra (1361 × 136192) não pega carona', () => {
+    expect(fotosDaBuscaEsquecidas([busca], resposta, [])).not.toContain(`${B}/1361/1.jpg`);
+  });
+  it('modelo já pediu a foto: não repete', () => {
+    expect(fotosDaBuscaEsquecidas([busca], resposta, [`${B}/136192/1.jpg`])).toEqual([]);
+  });
+  it('resposta sem a ficha (só pergunta): nenhuma foto', () => {
+    expect(fotosDaBuscaEsquecidas([busca], ['Que tipo de apartamento você procura?'], [])).toEqual([]);
+  });
+  it('sem busca no turno, ou imóvel sem foto: nada', () => {
+    expect(fotosDaBuscaEsquecidas([], resposta, [])).toEqual([]);
+    expect(fotosDaBuscaEsquecidas([busca], ['Mais fotos: https://costaemuniz-crm.lovable.app/site/imovel/167685'], [])).toEqual([]);
+  });
+  it('junto com intercalarMidias: acolhida, fotos, ficha', () => {
+    const fotos = fotosDaBuscaEsquecidas([busca], resposta, []);
+    const saida = intercalarMidias(resposta, fotos);
+    expect(saida[0]).toMatch(/^Separei/);
+    expect(saida.slice(1, 3).map(lerMarcador)).toEqual(fotos);
+    expect(saida[3]).toMatch(/^Apartamento de 2 quartos/);
   });
 });

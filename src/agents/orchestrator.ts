@@ -23,9 +23,10 @@ import {
   getUltimaMensagemAnterior,
   getConfigCotacao,
   getBufferDelayMs,
+  getMidiaNoFluxo,
 } from '../services/supabase';
 import { runExecutor } from './executor';
-import { midiasAdiadas, intercalarMidias, paraHistorico } from './midia-no-fluxo';
+import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
@@ -1141,6 +1142,14 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   // Mídia no fluxo (agents/midia-no-fluxo.ts): fotos que o `enviar_arquivo` deixou
   // para a resposta entram antes da última mensagem; o n8n manda tudo em ordem.
   const midias = midiasAdiadas(result.executorTrace.tools_called);
+  // Foto do imóvel da busca que a ficha apresentou e o modelo esqueceu de pedir (16/10, Canda).
+  if (await getMidiaNoFluxo(req.agent_id)) {
+    const esquecidas = fotosDaBuscaEsquecidas(result.executorTrace.tools_called, parsed.mensagens, midias);
+    if (esquecidas.length > 0) {
+      console.log(`[Mídia] conversation=${req.conversation_id} ${esquecidas.length} foto(s) da busca que o modelo não pediu`);
+      midias.push(...esquecidas);
+    }
+  }
   if (midias.length > 0) {
     parsed = { ...parsed, mensagens: intercalarMidias(parsed.mensagens, midias) };
   }
