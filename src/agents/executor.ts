@@ -18,6 +18,7 @@ import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
 import { escolherModeloExecutor } from './modelo-executor';
+import { textoFixoVizinho } from './texto-fixo-vizinho';
 
 // O Executor NÃO usa o `model_name` do agente (esse é o do Orquestrador). O dele
 // vem de `prompt_config.executor_model`, com `gpt-5.4-mini` como padrão — ver
@@ -163,11 +164,17 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
       } 
       // Verifica se é uma intent dinâmica
       else if (intentSlugs.has(toolName)) {
-        result = await handleExecutarIntent(
-          { intent_key: toolName, arguments: args },
-          input
-        );
-      } 
+        const barrado = textoFixoVizinho({ tarefa: input.query, ferramenta: toolName, intentsDoAgente: intentSlugs });
+        if (barrado) {
+          console.warn(`[Executor] texto fixo vizinho barrado: ${toolName} (agent_id=${input.agent_id} conversation=${input.conversation_id})`);
+          result = JSON.stringify({ status: 'error', bloqueado: true, error: barrado });
+        } else {
+          result = await handleExecutarIntent(
+            { intent_key: toolName, arguments: args },
+            input
+          );
+        }
+      }
       // Tool desconhecida
       else {
         result = JSON.stringify({ error: `Tool desconhecida: ${toolName}` });
