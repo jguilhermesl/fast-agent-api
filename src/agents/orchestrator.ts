@@ -32,7 +32,7 @@ import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
-import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
+import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, separarSystemDoTurno } from './anthropic-cache';
 import {
   comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME,
   LEMBRETE_RESPONDER, MAX_CHAMADAS_EXECUTOR_ANTHROPIC, EXECUTOR_NAO_CHAMADO,
@@ -215,7 +215,9 @@ async function reescreverSemValorInventado(
   deadline: Deadline,
 ): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
   const modelo = provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
-  const system = req.system_prompt + sufixoDeSaida(estilo);
+  // Mesmo corte do runAnthropic, para reaproveitar o cache da persona; na OpenAI vai inteiro.
+  const corte = provider === 'anthropic' ? separarSystemDoTurno(req.system_prompt) : { fixo: req.system_prompt, doTurno: '' };
+  const system = corte.fixo + sufixoDeSaida(estilo);
   const instrucao =
     `[Instrução interna, não é do cliente: a sua resposta anterior cita ${semFonte.join(', ')}, ` +
     'e isso não aparece no retorno das ferramentas deste turno, no que já foi enviado nem no seu prompt. ' +
@@ -225,7 +227,9 @@ async function reescreverSemValorInventado(
     `Retorno das ferramentas e textos já enviados:\n${fontes.slice(0, 15000)}`;
   const conversa = [
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user' as const, content: formatClientMessage(req.client_messages, req.client_message_type, false, req.nota_retomada) },
+    { role: 'user' as const, content: (corte.doTurno ? `${corte.doTurno}
+
+` : '') + formatClientMessage(req.client_messages, req.client_message_type, false, req.nota_retomada) },
     { role: 'assistant' as const, content: result.output || '(vazio)' },
     { role: 'user' as const, content: instrucao },
   ];
@@ -364,7 +368,13 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
-  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
+  // Persona fixa no system (cache entre conversas); dados do cliente, horário e CRM
+  // vão com a mensagem deste turno (agents/anthropic-cache.ts `separarSystemDoTurno`).
+  const { fixo: systemFixo, doTurno } = separarSystemDoTurno(req.system_prompt);
+  const formattedMessage =
+    (doTurno ? `${doTurno}
+
+` : '') + formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
@@ -400,7 +410,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       model: usedModel,
       // 8192: os modelos 5.x podem raciocinar antes de responder, e isso conta aqui.
       max_tokens: 8192,
-      system: systemComCache(req.system_prompt + sufixoDeSaida(estilo)),
+      system: systemComCache(systemFixo + sufixoDeSaida(estilo)),
       messages: mensagensComMarcadorNoFim(texto ? comLembrete(messages, texto) : messages),
       tools: ferramentasComCache(tools as Anthropic.Tool[]),
       tool_choice: comForca ? { type: 'any' } : { type: 'auto' },

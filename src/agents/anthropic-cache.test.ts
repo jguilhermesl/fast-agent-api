@@ -50,3 +50,26 @@ describe('cache de prompt da Anthropic', () => {
     expect(mensagensComMarcadorNoFim(msgs)).toBe(msgs);
   });
 });
+
+import { separarSystemDoTurno } from './anthropic-cache';
+
+describe('separarSystemDoTurno', () => {
+  it('persona fica fixa; dados do cliente, horário e CRM vão para o turno', () => {
+    const system = '# PAPEL\nVocê é a Duda.\n\n<dados_usuario>\nNome: Fulana\nHorário: quinta-feira, 15/10/2026 23:47\n</dados_usuario>\n<crm>\nnew\n</crm>';
+    const { fixo, doTurno } = separarSystemDoTurno(system);
+    expect(fixo).toBe('# PAPEL\nVocê é a Duda.');
+    expect(doTurno.startsWith('<dados_usuario>')).toBe(true);
+    expect(doTurno).toContain('23:47');
+    expect(fixo).not.toContain('23:47');
+  });
+
+  it('dois turnos com horário diferente têm a mesma parte fixa (é o que deixa o cache valer)', () => {
+    const a = separarSystemDoTurno('PERSONA\n<dados_usuario>\nHorário: 12:08\n</dados_usuario>');
+    const b = separarSystemDoTurno('PERSONA\n<dados_usuario>\nHorário: 12:09\n</dados_usuario>');
+    expect(a.fixo).toBe(b.fixo);
+  });
+
+  it('system sem o bloco fica inteiro como fixo', () => {
+    expect(separarSystemDoTurno('só persona')).toEqual({ fixo: 'só persona', doTurno: '' });
+  });
+});
