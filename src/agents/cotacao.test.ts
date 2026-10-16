@@ -158,3 +158,28 @@ describe('cotação: envelope real do intent-dispatcher', () => {
     expect(resolverMarcadores(['• Valor: {{preco:Prevenção completa}}'], cat).mensagens).toEqual(['• Valor: R$ 150,00 (Sem direito a retorno)']);
   });
 });
+
+describe('cotação: achados da suíte de 16/10', () => {
+  const mk = (nome: string, disponibilidades: unknown[] = []) => ({ tool: 'conferir_especialidades', result: [{ nome, preco: 'R$ 1', disponibilidades }] });
+
+  it('"Psiquiatria" casa o apelido exato do adulto, não a infantil', () => {
+    const cat = catalogoDoTurno([mk('Psiquiatria Infantil'), mk('Psiquiatria, Psiquiatra, atestado físico e mental, atestado psiquiátrico')]);
+    expect(acharItem('Psiquiatria', cat)?.nome).toMatch(/^Psiquiatria, Psiquiatra/);
+    expect(acharItem('Psiquiatria Infantil', cat)?.nome).toBe('Psiquiatria Infantil');
+  });
+
+  it('ambíguo sem apelido exato não chuta', () => {
+    const cat = catalogoDoTurno([mk('Cardiologia adulto'), mk('Cardiologia infantil')]);
+    expect(acharItem('cardiologia', cat)).toBeNull();
+  });
+
+  it('{{datas:ITEM|PROFISSIONAL}} filtra (parecer para concurso só com o Dr. André)', () => {
+    const cat = catalogoDoTurno([mk('Parecer Cardiológico', [
+      { 'data/horario': 'quarta, 21/10/2026 - 13:30 - Ordem de chegada', profissional: 'André Macedo' },
+      { 'data/horario': 'sábado, 24/10/2026 - 09:30 - Ordem de chegada', profissional: 'Juliana Russo' },
+    ])]);
+    const r = resolverMarcadores(['{{datas:Parecer Cardiológico|André Macedo}}'], cat, { 'André Macedo': 'Dr.', 'Juliana Russo': 'Dra.' });
+    expect(r.mensagens[0]).toBe('Dr. André Macedo\n• Quarta-feira, 21/10 às 13h30 (ordem de chegada)');
+    expect(r.mensagens[0]).not.toContain('Juliana');
+  });
+});

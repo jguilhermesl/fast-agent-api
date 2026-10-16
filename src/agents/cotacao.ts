@@ -44,8 +44,8 @@ export const INSTRUCAO_COTACAO = `
 Valor, valor no Pix e datas de item que a busca trouxe neste turno você NÃO digita. Escreva o marcador e o sistema troca pelo texto exato da planilha:
 - \`{{preco:NOME DO ITEM}}\`: o valor, já com o parcelamento que a planilha tiver.
 - \`{{pix:NOME DO ITEM}}\`: o valor no Pix ou dinheiro. Se o item não tiver, a linha inteira some, então deixe esse marcador sozinho na linha.
-- \`{{datas:NOME DO ITEM}}\`: o bloco de datas, com o profissional (e "Dr."/"Dra." quando for médico), o dia e o horário.
-Use o nome do item como ele veio no retorno da busca. Não escreva "R$", dia/mês nem horário desses itens fora do marcador, e não repita o parcelamento depois do \`{{preco:...}}\`.
+- \`{{datas:NOME DO ITEM}}\`: o bloco de datas, com o profissional (e "Dr."/"Dra." quando for médico), o dia e o horário. Quando a regra do item limita o profissional (parecer para concurso, idade, especialidade), use \`{{datas:NOME DO ITEM|NOME DO PROFISSIONAL}}\` e só as datas dele saem.
+Use o nome do item EXATAMENTE como veio no retorno da busca (copie), principalmente quando houver itens parecidos, como adulto e infantil. Não escreva "R$", dia/mês nem horário desses itens fora do marcador, e não repita o parcelamento depois do \`{{preco:...}}\`.
 Valor que você calcula (soma de dois itens, total com desconto) ou que está escrito no seu prompt continua escrito por você.
 Exemplo:
 "Clínico Geral\\n\\n• Valor: {{preco:Clínico Geral}}\\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA\\n\\nDatas disponíveis:\\n{{datas:Clínico Geral}}"`;
@@ -132,15 +132,25 @@ export function acharItem(pedido: string, catalogo: ItemCotacao[]): ItemCotacao 
   const iguais = catalogo.filter((i) => normalizar(i.nome) === p);
   if (iguais.length) return iguais[0];
 
+  // Nome de item da planilha é lista de apelidos ("Psiquiatria, Psiquiatra, atestado físico
+  // e mental", "ULTRASSOM/USG ABDOME TOTAL"): apelido igual ao pedido decide.
+  const porApelido = catalogo.filter((i) => i.nome.split(/[,/|]/).some((a) => normalizar(a) === p));
+  if (porApelido.length === 1) return porApelido[0];
+
   const doPedido = palavras(pedido);
   if (!doPedido.length) return null;
-  const porTamanho = (a: ItemCotacao, b: ItemCotacao) => normalizar(a.nome).length - normalizar(b.nome).length;
 
   const contemTudo = catalogo.filter((i) => {
     const doItem = new Set(palavras(i.nome));
     return doPedido.every((w) => doItem.has(w));
   });
-  if (contemTudo.length) return [...contemTudo].sort(porTamanho)[0];
+  // Mais de um item com todas as palavras ("Psiquiatria" → adulto e infantil) é ambíguo:
+  // não acha, e a reescrita mostra a lista para o modelo escolher o nome exato.
+  if (contemTudo.length === 1) return contemTudo[0];
+  if (contemTudo.length > 1) {
+    const distintos = new Set(contemTudo.map((i) => normalizar(i.nome)));
+    return distintos.size === 1 ? contemTudo[0] : null;
+  }
 
   const setPedido = new Set(doPedido);
   const contidoNoPedido = catalogo.filter((i) => {
@@ -149,7 +159,7 @@ export function acharItem(pedido: string, catalogo: ItemCotacao[]): ItemCotacao 
     const setItem = new Set(doItem);
     return doPedido.every((w) => setItem.has(w) || GENERICAS.has(w));
   });
-  if (contidoNoPedido.length) return [...contidoNoPedido].sort(porTamanho).reverse()[0];
+  if (contidoNoPedido.length === 1) return contidoNoPedido[0];
   return null;
 }
 
@@ -208,10 +218,13 @@ export function nomeComTitulo(nome: string, titulos: Record<string, string>): st
 }
 
 /** Bloco de datas agrupado por profissional, na ordem em que a agenda trouxe. */
-export function blocoDeDatas(item: ItemCotacao, titulos: Record<string, string>): string {
-  if (!item.disponibilidades.length) return 'Sem data aberta na agenda no momento.';
+export function blocoDeDatas(item: ItemCotacao, titulos: Record<string, string>, so?: string): string {
+  const lista = so
+    ? item.disponibilidades.filter((d) => normalizar(String(d.profissional ?? '')).includes(normalizar(so)) || normalizar(so).includes(normalizar(String(d.profissional ?? '-'))))
+    : item.disponibilidades;
+  if (!lista.length) return so ? `Sem data aberta com ${nomeComTitulo(so, titulos)} na agenda no momento.` : 'Sem data aberta na agenda no momento.';
   const grupos = new Map<string, string[]>();
-  for (const d of item.disponibilidades) {
+  for (const d of lista) {
     const prof = String(d.profissional ?? '').trim();
     const chave = prof && prof !== '-' ? nomeComTitulo(prof, titulos) : '';
     const linha = `• ${linhaDeData(String(d['data/horario'] ?? ''))}`;
@@ -237,7 +250,9 @@ export function resolverMarcadores(
       .split('\n')
       .map((linha) => {
         let some = false;
-        const nova = linha.replace(MARCADOR, (bruto, tipoBruto: string, nome: string) => {
+        const nova = linha.replace(MARCADOR, (bruto, tipoBruto: string, nomeBruto: string) => {
+          // {{datas:ITEM|PROFISSIONAL}}: só as datas daquele profissional.
+          const [nome, so] = nomeBruto.split('|').map((x) => x.trim());
           const tipoLido = normalizar(tipoBruto);
           const tipo = tipoLido === 'valor' ? 'preco' : tipoLido;
           const item = acharItem(nome, catalogo);
@@ -253,7 +268,7 @@ export function resolverMarcadores(
             return item.precoPix;
           }
           resolvidos++;
-          return blocoDeDatas(item, titulos);
+          return blocoDeDatas(item, titulos, tipo === 'datas' && so ? so : undefined);
         });
         return some ? null : nova;
       })
