@@ -28,7 +28,7 @@ import { runExecutor } from './executor';
 import { midiasAdiadas, intercalarMidias, paraHistorico } from './midia-no-fluxo';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
-import { INSTRUCAO_COTACAO, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
+import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
@@ -834,7 +834,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
       } else desfechoCot = 'reescrita_falhou';
     }
     const semMarcador = cot.mensagens
-      .map((m) => m.split('\n').filter((l) => !/\{\{[^}]*\}\}/.test(l)).join('\n').trim())
+      .map((m) => m.split('\n').filter((l) => !RESTO_DE_MARCADOR.test(l)).join('\n').trim())
       .filter((m) => m.length > 0);
     parsed = semMarcador.length
       ? { ...parsed, mensagens: semMarcador }
@@ -958,6 +958,19 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         guard_mode: config.lastroMode,
       });
     }
+  }
+
+  // Passada final da cotação: a reescrita do guard de lastro (acima) também recebe a
+  // instrução dos marcadores e pode devolver {{...}}. Resolve com o mesmo catálogo e
+  // tira a linha que sobrar com marcador; sem texto nenhum, transfere.
+  if (temMarcador(parsed.mensagens)) {
+    const r = resolverMarcadores(parsed.mensagens, catalogoDoTurno(result.executorTrace.tools_called), req.cotacao?.titulos ?? {});
+    const limpas = r.mensagens
+      .map((m) => m.split('\n').filter((l) => !RESTO_DE_MARCADOR.test(l)).join('\n').trim())
+      .filter((m) => m.length > 0);
+    parsed = limpas.length
+      ? { ...parsed, mensagens: limpas }
+      : { mensagens: [MENSAGEM_VALOR_A_CONFIRMAR], redirect_human: true, transfer_reason: 'Cotação sem item correspondente na busca: a equipe confirma valor e datas.' };
   }
 
   // Guard de agendamento: a resposta não pode afirmar que o horário está marcado

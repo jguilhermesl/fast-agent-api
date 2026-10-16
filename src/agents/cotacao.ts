@@ -50,7 +50,9 @@ Valor que você calcula (soma de dois itens, total com desconto) ou que está es
 Exemplo:
 "Clínico Geral\\n\\n• Valor: {{preco:Clínico Geral}}\\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA\\n\\nDatas disponíveis:\\n{{datas:Clínico Geral}}"`;
 
-const MARCADOR = /\{\{\s*(preco|pix|datas)\s*:\s*([^}]+?)\s*\}\}/gi;
+const MARCADOR = /\{\{\s*(preco|preço|valor|pix|datas)\s*:\s*([^}]+?)\s*\}\}/gi;
+/** Qualquer resto de marcador ({{, }}), bem formado ou não: a linha com ele nunca vai ao paciente. */
+export const RESTO_DE_MARCADOR = /\{\{|\}\}/;
 
 const normalizar = (s: string): string =>
   s
@@ -89,7 +91,9 @@ export function catalogoDoTurno(toolsCalled: Array<{ tool: string; result: unkno
         nome,
         preco: textoOuNulo(x.preco),
         precoPix: textoOuNulo(x.precoPix),
-        disponibilidades: Array.isArray(x.disponibilidades) ? (x.disponibilidades as DisponibilidadeCotacao[]) : [],
+        disponibilidades: Array.isArray(x.disponibilidades)
+          ? (x.disponibilidades as unknown[]).filter((d): d is DisponibilidadeCotacao => !!d && typeof d === 'object')
+          : [],
         ferramenta: chamada.tool,
       });
     }
@@ -97,10 +101,23 @@ export function catalogoDoTurno(toolsCalled: Array<{ tool: string; result: unkno
   return itens;
 }
 
+/** Palavras que não distinguem um item de outro. */
+const PALAVRAS_VAZIAS = new Set(['de', 'do', 'da', 'dos', 'das', 'e', 'com', 'para', 'o', 'a', 'em', 'no', 'na']);
+/** Palavras genéricas que o modelo acrescenta ao nome ("ultrassom do joelho", "consulta com clínico"). */
+const GENERICAS = new Set(['ultrassom', 'usg', 'exame', 'exames', 'consulta', 'valor', 'teste', 'procedimento']);
+
+const palavras = (s: string): string[] => normalizar(s).split(' ').filter((w) => w.length > 1 && !PALAVRAS_VAZIAS.has(w));
+
 /**
- * Acha o item pelo nome que o modelo escreveu. Ordem: igual (normalizado), um contido
- * no outro, e por último a maior sobreposição de palavras (≥ 60% das palavras do
- * pedido). Empate entre itens diferentes = não acha: melhor pedir reescrita que chutar.
+ * Acha o item pelo nome que o modelo escreveu. Sem chute, porque o preço errado é
+ * pior que pedir reescrita:
+ *   1. nome igual (normalizado);
+ *   2. todas as palavras distintivas do pedido estão no nome do item → o mais curto
+ *      ("USG abdome total" → "ULTRASSOM/USG ABDOME TOTAL", não "… COM DOPPLER");
+ *   3. o nome do item inteiro está no pedido e o que sobra são palavras genéricas
+ *      ("ultrassom do Clínico Geral"? não; "consulta Clínico Geral" → "Clínico Geral").
+ * "Raio-X do joelho" com só "Raio-X do tornozelo" no catálogo = não acha.
+ * "Colesterol LDL" com "Colesterol" e "Colesterol HDL" = não acha.
  */
 export function acharItem(pedido: string, catalogo: ItemCotacao[]): ItemCotacao | null {
   const p = normalizar(pedido);
@@ -108,30 +125,25 @@ export function acharItem(pedido: string, catalogo: ItemCotacao[]): ItemCotacao 
   const iguais = catalogo.filter((i) => normalizar(i.nome) === p);
   if (iguais.length) return iguais[0];
 
-  const contidos = catalogo.filter((i) => {
-    const n = normalizar(i.nome);
-    return n.includes(p) || p.includes(n);
-  });
-  if (contidos.length) {
-    // O mais curto que contém o pedido é o mais específico ("USG ABDOME TOTAL" antes de "… COM DOPPLER").
-    const ordenados = [...contidos].sort((a, b) => normalizar(a.nome).length - normalizar(b.nome).length);
-    return ordenados[0];
-  }
+  const doPedido = palavras(pedido);
+  if (!doPedido.length) return null;
+  const porTamanho = (a: ItemCotacao, b: ItemCotacao) => normalizar(a.nome).length - normalizar(b.nome).length;
 
-  const palavrasPedido = new Set(p.split(' ').filter((w) => w.length > 1));
-  if (!palavrasPedido.size) return null;
-  let melhor: ItemCotacao | null = null;
-  let melhorNota = 0;
-  let empate = false;
-  for (const item of catalogo) {
-    const palavrasItem = new Set(normalizar(item.nome).split(' '));
-    let comuns = 0;
-    for (const w of palavrasPedido) if (palavrasItem.has(w)) comuns++;
-    const nota = comuns / palavrasPedido.size;
-    if (nota > melhorNota) { melhor = item; melhorNota = nota; empate = false; }
-    else if (nota === melhorNota && nota > 0 && melhor && normalizar(melhor.nome) !== normalizar(item.nome)) empate = true;
-  }
-  return melhor && melhorNota >= 0.6 && !empate ? melhor : null;
+  const contemTudo = catalogo.filter((i) => {
+    const doItem = new Set(palavras(i.nome));
+    return doPedido.every((w) => doItem.has(w));
+  });
+  if (contemTudo.length) return [...contemTudo].sort(porTamanho)[0];
+
+  const setPedido = new Set(doPedido);
+  const contidoNoPedido = catalogo.filter((i) => {
+    const doItem = palavras(i.nome);
+    if (!doItem.length || !doItem.every((w) => setPedido.has(w))) return false;
+    const setItem = new Set(doItem);
+    return doPedido.every((w) => setItem.has(w) || GENERICAS.has(w));
+  });
+  if (contidoNoPedido.length) return [...contidoNoPedido].sort(porTamanho).reverse()[0];
+  return null;
 }
 
 const DIA_DA_SEMANA: Record<string, string> = {
@@ -193,14 +205,16 @@ export function blocoDeDatas(item: ItemCotacao, titulos: Record<string, string>)
   if (!item.disponibilidades.length) return 'Sem data aberta na agenda no momento.';
   const grupos = new Map<string, string[]>();
   for (const d of item.disponibilidades) {
-    const prof = (d.profissional ?? '').trim();
+    const prof = String(d.profissional ?? '').trim();
     const chave = prof && prof !== '-' ? nomeComTitulo(prof, titulos) : '';
     const linha = `• ${linhaDeData(String(d['data/horario'] ?? ''))}`;
     const lista = grupos.get(chave) ?? [];
     if (!lista.includes(linha)) lista.push(linha);
     grupos.set(chave, lista);
   }
-  return [...grupos.entries()].map(([prof, linhas]) => (prof ? `${prof}\n${linhas.join('\n')}` : linhas.join('\n'))).join('\n');
+  // Datas sem profissional vão primeiro: no meio, ficariam coladas sob o médico anterior.
+  const entradas = [...grupos.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : 0));
+  return entradas.map(([prof, linhas]) => (prof ? `${prof}\n${linhas.join('\n')}` : linhas.join('\n'))).join('\n');
 }
 
 /** Troca os marcadores das mensagens pelo texto dos itens do turno. */
@@ -217,7 +231,8 @@ export function resolverMarcadores(
       .map((linha) => {
         let some = false;
         const nova = linha.replace(MARCADOR, (bruto, tipoBruto: string, nome: string) => {
-          const tipo = tipoBruto.toLowerCase();
+          const tipoLido = normalizar(tipoBruto);
+          const tipo = tipoLido === 'valor' ? 'preco' : tipoLido;
           const item = acharItem(nome, catalogo);
           if (!item) { naoResolvidos.push(`${tipo}:${nome}`); return bruto; }
           if (tipo === 'preco') {
@@ -246,5 +261,5 @@ export function resolverMarcadores(
 /** A resposta tem algum marcador? (barato: evita montar catálogo em turno sem cotação). */
 export function temMarcador(mensagens: string[]): boolean {
   MARCADOR.lastIndex = 0;
-  return mensagens.some((m) => /\{\{\s*(preco|pix|datas)\s*:/i.test(m));
+  return mensagens.some((m) => RESTO_DE_MARCADOR.test(m));
 }

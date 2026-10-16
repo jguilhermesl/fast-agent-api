@@ -111,3 +111,39 @@ describe('cotação no código', () => {
     expect(temMarcador(['• Valor: {{preco: X }}'])).toBe(true);
   });
 });
+
+describe('cotação: achados da revisão de 16/10', () => {
+  const mk = (nome: string, preco: string, disponibilidades: unknown[] = []) => ({ tool: 'conferir_especialidades', result: [{ nome, preco, disponibilidades }] });
+
+  it('não troca joelho por tornozelo nem LDL por colesterol total', () => {
+    const cat = catalogoDoTurno([mk('Raio-X do tornozelo', 'R$ 70,00'), mk('Colesterol', 'R$ 10,00'), mk('Colesterol HDL', 'R$ 12,00')]);
+    expect(acharItem('Raio-X do joelho', cat)).toBeNull();
+    expect(acharItem('Colesterol LDL', cat)).toBeNull();
+    expect(acharItem('Colesterol HDL', cat)?.preco).toBe('R$ 12,00');
+    expect(acharItem('exame de Colesterol', cat)?.preco).toBe('R$ 10,00');
+  });
+
+  it('marcador com acento ou "valor" também resolve; marcador torto nunca passa como texto resolvido', () => {
+    const cat = catalogoDoTurno([mk('Clínico Geral', 'R$85 - 3X SEM JUROS')]);
+    expect(resolverMarcadores(['A: {{preço:Clínico Geral}}', 'B: {{valor:Clínico Geral}}'], cat).mensagens).toEqual(['A: R$85 - 3X SEM JUROS', 'B: R$85 - 3X SEM JUROS']);
+    expect(temMarcador(['{{Preco Clínico}}'])).toBe(true);
+    expect(temMarcador(['valor }}'])).toBe(true);
+  });
+
+  it('datas sem profissional vão antes dos grupos com nome', () => {
+    const cat = catalogoDoTurno([mk('Ultrassom', 'R$ 1', [
+      { 'data/horario': 'segunda, 19/10/2026 - 11:00 - Ordem de chegada', profissional: 'Francisco Gadelha' },
+      { 'data/horario': 'terça, 20/10/2026 - 08:00 - Ordem de chegada', profissional: '-' },
+      { 'data/horario': 'quarta, 21/10/2026 - 09:00 - Ordem de chegada', profissional: 'Misael Mustafa' },
+    ])]);
+    expect(blocoDeDatas(cat[0], {})).toBe(
+      '• Terça-feira, 20/10 às 08h (ordem de chegada)\nFrancisco Gadelha\n• Segunda-feira, 19/10 às 11h (ordem de chegada)\nMisael Mustafa\n• Quarta-feira, 21/10 às 09h (ordem de chegada)',
+    );
+  });
+
+  it('agenda com nulo ou profissional não-texto não derruba', () => {
+    const cat = catalogoDoTurno([mk('Ultrassom', 'R$ 1', [null, 7, { 'data/horario': 'sábado, 31/10/2026', profissional: 123 }])]);
+    expect(() => blocoDeDatas(cat[0], {})).not.toThrow();
+    expect(blocoDeDatas(cat[0], {})).toBe('123\n• Sábado, 31/10');
+  });
+});
