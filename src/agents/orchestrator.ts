@@ -31,6 +31,7 @@ import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
+import { comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME } from './anthropic-executor-obrigatorio';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, TURN_BUDGET_MS, type Deadline } from '../services/deadline';
@@ -62,6 +63,9 @@ const MAX_TOOL_ROUNDS = 5;
 
 /** Modelo OpenAI usado quando o provedor principal (Anthropic) falha. */
 const MODELO_FALLBACK_OPENAI = 'gpt-5.4';
+
+/** Modelos da Anthropic que já recusaram `tool_choice` any/tool neste processo. */
+const modelosSemFerramentaForcada = new Set<string>();
 
 // Detecção de saudação/despedida pura: `./saudacao.ts` (função pura, com teste).
 // Mensagens curtas de cumprimento não precisam de busca na base de conhecimento.
@@ -264,23 +268,37 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   const allExecutorTraces: ExecutorTrace[] = [];
   const communications: Array<{ query: string; result: string }> = [];
 
+  let lembreteFirmeUsado = false;
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (deadline.expired()) throw new DeadlineExceededError(`orquestrador Anthropic round ${round + 1}`);
     rounds = round + 1;
-    // Round 0: força o executor (exceto em saudações/despedidas)
-    const toolChoice: Anthropic.MessageCreateParams['tool_choice'] =
-      (round === 0 && forceExecutor) ? { type: 'any' } : { type: 'auto' };
+    // Round 0: o executor é obrigatório (exceto em saudações/despedidas). Modelo que
+    // aceita ferramenta forçada recebe `any`; o que recusa (claude-sonnet-5-5, 16/10)
+    // vai com `auto` + lembrete interno (agents/anthropic-executor-obrigatorio.ts).
+    const obrigatorio = round === 0 && forceExecutor;
+    const forcar = obrigatorio && !modelosSemFerramentaForcada.has(usedModel);
+    const lembrete = obrigatorio && !forcar ? (lembreteFirmeUsado ? LEMBRETE_EXECUTOR_FIRME : LEMBRETE_EXECUTOR) : null;
     // Cache de prompt (agents/anthropic-cache.ts): ferramentas, system e o fim da
     // conversa vão marcados com `cache_control`; sem isso cada rodada pagava o prompt
     // inteiro. A cópia marcada é montada a cada chamada, `messages` segue sem marca.
-    const response = await anthropic.messages.create({
+    const chamar = (comForca: boolean, texto: string | null) => anthropic.messages.create({
       model: usedModel,
-      max_tokens: 4096,
+      // 8192: os modelos 5.x podem raciocinar antes de responder, e isso conta aqui.
+      max_tokens: 8192,
       system: systemComCache(req.system_prompt + sufixoDeSaida(estilo)),
-      messages: mensagensComMarcadorNoFim(messages),
+      messages: mensagensComMarcadorNoFim(texto ? comLembrete(messages, texto) : messages),
       tools: ferramentasComCache(tools as Anthropic.Tool[]),
-      tool_choice: toolChoice,
+      tool_choice: comForca ? { type: 'any' } : { type: 'auto' },
     }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+    let response: Anthropic.Message;
+    try {
+      response = await chamar(forcar, lembrete);
+    } catch (err) {
+      if (!forcar || !ehRecusaDeFerramentaForcada(err)) throw err;
+      modelosSemFerramentaForcada.add(usedModel);
+      console.warn(`[Orchestrator] ${usedModel} não aceita ferramenta forçada: segue com auto + lembrete`);
+      response = await chamar(false, LEMBRETE_EXECUTOR);
+    }
 
     totalIn  += response.usage.input_tokens;
     totalOut += response.usage.output_tokens;
@@ -293,6 +311,15 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     const anthropicCached = uso.cache_read_input_tokens ?? 0;
     totalIn     += anthropicCached + (uso.cache_creation_input_tokens ?? 0);
     totalCached += anthropicCached;
+
+    // Rodada 0 obrigatória que terminou sem executor (só acontece no caminho `auto`):
+    // descarta a resposta e repete uma vez com o lembrete firme. Se insistir, segue.
+    if (response.stop_reason !== 'tool_use' && obrigatorio && !forcar && !lembreteFirmeUsado) {
+      lembreteFirmeUsado = true;
+      console.warn(`[Orchestrator] ${usedModel} respondeu sem chamar o executor na rodada 0: repetindo com lembrete firme`);
+      round -= 1;
+      continue;
+    }
 
     if (response.stop_reason !== 'tool_use') {
       const textBlock = response.content.find((b) => b.type === 'text');

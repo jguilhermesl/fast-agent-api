@@ -11,6 +11,11 @@ describe('escolherModeloExecutor', () => {
     expect(escolherModeloExecutor({ doAgente: 'gpt-6-luna' })).toBe('gpt-6-luna');
   });
 
+  it('aceita os Claude 5.5 no Executor (caminho claude-* de executor.ts)', () => {
+    expect(escolherModeloExecutor({ doAgente: 'claude-haiku-5-5' })).toBe('claude-haiku-5-5');
+    expect(escolherModeloExecutor({ doCorpo: 'claude-sonnet-5-5' })).toBe('claude-sonnet-5-5');
+  });
+
   it('o corpo da requisição (suíte) passa na frente do agente', () => {
     expect(escolherModeloExecutor({ doCorpo: 'gpt-5.6-luna', doAgente: 'gpt-6-luna' })).toBe('gpt-5.6-luna');
   });

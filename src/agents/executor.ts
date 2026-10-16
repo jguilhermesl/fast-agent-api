@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
 import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
@@ -9,16 +10,18 @@ import {
   handleKnowledgeBase,
 } from '../tools/handlers';
 import { 
-  EXECUTOR_TOOLS, 
+  EXECUTOR_TOOLS,
   toOpenAITools,
+  toAnthropicTools,
   createDynamicToolsFromIntents,
   combineTools
 } from '../tools/definitions';
 import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
-import { escolherModeloExecutor } from './modelo-executor';
+import { escolherModeloExecutor, MODELO_EXECUTOR_PADRAO } from './modelo-executor';
 import { textoFixoVizinho } from './texto-fixo-vizinho';
+import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
 
 // O Executor NÃO usa o `model_name` do agente (esse é o do Orquestrador). O dele
 // vem de `prompt_config.executor_model`, com `gpt-5.4-mini` como padrão — ver
@@ -27,6 +30,7 @@ import { textoFixoVizinho } from './texto-fixo-vizinho';
 // Mesmo teto de relógio do orquestrador (ver LLM_TIMEOUT_MS lá): antes o único
 // limite era de rodadas, e 8 rodadas sem timeout não têm teto de tempo nenhum.
 const openai = new OpenAI({ apiKey: config.openaiApiKey, timeout: 60_000, maxRetries: 1 });
+const anthropic = new Anthropic({ apiKey: config.anthropicApiKey, timeout: 60_000, maxRetries: 1 });
 
 const MAX_TOOL_ROUNDS = 8;
 
@@ -107,7 +111,98 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
   let esgotouPorPrazo = false;
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+  // Executa UMA ferramenta pedida pelo modelo, seja qual for o provedor, e registra no log.
+  const executarFerramenta = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
+    let result: string;
+    if (toolName === 'atualizar_lead_crm') {
+      result = await handleAtualizarLeadCRM(args as { stage: string }, input);
+    } else if (toolName === 'enviar_arquivo') {
+      result = await handleEnviarArquivo(args as { file_url: string }, input);
+    } else if (toolName === 'agent_knowledge_base') {
+      result = await handleKnowledgeBase(args as { query: string }, input);
+    } else if (intentSlugs.has(toolName)) {
+      const barrado = textoFixoVizinho({ tarefa: input.query, ferramenta: toolName, intentsDoAgente: intentSlugs });
+      if (barrado) {
+        console.warn(`[Executor] texto fixo vizinho barrado: ${toolName} (agent_id=${input.agent_id} conversation=${input.conversation_id})`);
+        result = JSON.stringify({ status: 'error', bloqueado: true, error: barrado });
+      } else {
+        result = await handleExecutarIntent({ intent_key: toolName, arguments: args }, input);
+      }
+    } else {
+      result = JSON.stringify({ error: `Tool desconhecida: ${toolName}` });
+    }
+    let parsedResult: unknown = result;
+    try { parsedResult = JSON.parse(result); } catch { /* mantém string */ }
+    toolsCalledLog.push({ tool: toolName, arguments: args, result: parsedResult });
+    return result;
+  };
+
+  // ── Caminho Anthropic (modelo claude-*) ──
+  // Mesmas ferramentas, mesmo prompt, com cache de prompt (agents/anthropic-cache.ts).
+  // Se o Claude falhar ANTES de executar qualquer ferramenta, o turno segue no
+  // gpt-5.4-mini e o erro fica em agent_error_logs. Se falhar DEPOIS, não repete:
+  // repetir arriscaria executar duas vezes (agendamento, por exemplo).
+  let modeloDaVez = modelo;
+  let pularOpenAI = false;
+  if (modelo.startsWith('claude-')) {
+    const toolsAnthropic = ferramentasComCache(toAnthropicTools(allTools) as Anthropic.Tool[]);
+    const msgsAnthropic: Anthropic.MessageParam[] = [{ role: 'user', content: messages[1].content as string }];
+    try {
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        if (input.deadline?.expired()) { esgotouPorPrazo = true; break; }
+        rounds = round + 1;
+        const response = await anthropic.messages.create({
+          model: modelo,
+          max_tokens: 8192,
+          system: systemComCache(systemPrompt),
+          messages: mensagensComMarcadorNoFim(msgsAnthropic),
+          tools: toolsAnthropic,
+          tool_choice: { type: 'auto' },
+        }, { timeout: capTimeout(60_000, input.deadline) });
+        const uso = response.usage as { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+        totalInputTokens  += uso.input_tokens + (uso.cache_read_input_tokens ?? 0) + (uso.cache_creation_input_tokens ?? 0);
+        totalCachedTokens += uso.cache_read_input_tokens ?? 0;
+        totalOutputTokens += uso.output_tokens;
+        usedModel = modelo;
+
+        if (response.stop_reason !== 'tool_use') {
+          await saveTokenUsage(buildTokenLogEntry({
+            agent_id: input.agent_id, conversation_id: input.conversation_id, lead_id: input.lead_id,
+            model: usedModel, tokensIn: totalInputTokens, tokensOut: totalOutputTokens, tokensCached: totalCachedTokens,
+          }));
+          const texto = response.content.filter((b) => b.type === 'text').map((b) => (b.type === 'text' ? b.text : '')).join('\n');
+          return buildTrace(texto || '(sem resposta)');
+        }
+
+        msgsAnthropic.push({ role: 'assistant', content: response.content });
+        const resultados: Anthropic.ToolResultBlockParam[] = [];
+        for (const bloco of response.content) {
+          if (bloco.type !== 'tool_use') continue;
+          const resultado = await executarFerramenta(bloco.name, (bloco.input ?? {}) as Record<string, unknown>);
+          resultados.push({ type: 'tool_result', tool_use_id: bloco.id, content: resultado });
+        }
+        msgsAnthropic.push({ role: 'user', content: resultados });
+      }
+      pularOpenAI = true; // esgotou rodadas ou prazo no Claude: cai no bloco final abaixo
+    } catch (err) {
+      const erro = err instanceof Error ? err.message : String(err);
+      await logError({
+        conversation_id: input.conversation_id,
+        agent_id: input.agent_id,
+        lead_id: input.lead_id,
+        error_message: `Executor ${modelo}: ${erro}` + (toolsCalledLog.length ? ' | já tinha executado ferramenta, não repete' : ` | usando ${MODELO_EXECUTOR_PADRAO}`),
+        provider_failed: 'anthropic',
+        layer: 'executor-fallback',
+      });
+      if (toolsCalledLog.length) {
+        return buildTrace(`FALHA: executor ${modelo} parou no meio (${erro.slice(0, 120)}). Ferramentas já executadas: ${toolsCalledLog.map((t) => t.tool).join(', ')}.`);
+      }
+      modeloDaVez = MODELO_EXECUTOR_PADRAO;
+      rounds = 0;
+    }
+  }
+
+  for (let round = 0; !pularOpenAI && round < MAX_TOOL_ROUNDS; round++) {
     // Orçamento agregado do turno (ver services/deadline.ts) — checado ANTES de
     // gastar mais uma rodada. Sem isto, MAX_TOOL_ROUNDS=8 só limita QUANTIDADE
     // de chamadas, nunca o relógio; o orquestrador pode ter herdado quase nada
@@ -118,11 +213,11 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     }
     rounds = round + 1;
     const response = await openai.chat.completions.create({
-      model: modelo,
+      model: modeloDaVez,
       messages,
       tools,
       tool_choice: 'auto',
-      ...amostragemDoModelo(modelo, 0.3),
+      ...amostragemDoModelo(modeloDaVez, 0.3),
     }, { timeout: capTimeout(60_000, input.deadline) });
 
     const msg = response.choices[0].message;
@@ -152,38 +247,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     for (const toolCall of msg.tool_calls) {
       const toolName = toolCall.function.name;
       const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
-      let result: string;
-
-      // Verifica se é uma tool estática
-      if (toolName === 'atualizar_lead_crm') {
-        result = await handleAtualizarLeadCRM(args as { stage: string }, input);
-      } else if (toolName === 'enviar_arquivo') {
-        result = await handleEnviarArquivo(args as { file_url: string }, input);
-      } else if (toolName === 'agent_knowledge_base') {
-        result = await handleKnowledgeBase(args as { query: string }, input);
-      } 
-      // Verifica se é uma intent dinâmica
-      else if (intentSlugs.has(toolName)) {
-        const barrado = textoFixoVizinho({ tarefa: input.query, ferramenta: toolName, intentsDoAgente: intentSlugs });
-        if (barrado) {
-          console.warn(`[Executor] texto fixo vizinho barrado: ${toolName} (agent_id=${input.agent_id} conversation=${input.conversation_id})`);
-          result = JSON.stringify({ status: 'error', bloqueado: true, error: barrado });
-        } else {
-          result = await handleExecutarIntent(
-            { intent_key: toolName, arguments: args },
-            input
-          );
-        }
-      }
-      // Tool desconhecida
-      else {
-        result = JSON.stringify({ error: `Tool desconhecida: ${toolName}` });
-      }
-
-      // Registra no log
-      let parsedResult: unknown = result;
-      try { parsedResult = JSON.parse(result); } catch { /* mantém string */ }
-      toolsCalledLog.push({ tool: toolName, arguments: args, result: parsedResult });
+      const result = await executarFerramenta(toolName, args);
 
       messages.push({
         role: 'tool',
