@@ -21,6 +21,7 @@ const ChatRequestSchema = z.object({
   system_prompt:        z.string().min(1),
   tenant_id:            z.string().optional(),
   executor_model:       z.string().optional(),
+  cotacao_no_codigo:    z.boolean().optional(),
 });
 
 // ── Auth middleware ────────────────────────────────────────────

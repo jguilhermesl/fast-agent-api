@@ -21,12 +21,14 @@ import {
   getEstadoDoLead,
   getUltimasMensagensDaConversa,
   getUltimaMensagemAnterior,
+  getConfigCotacao,
   getBufferDelayMs,
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { midiasAdiadas, intercalarMidias, paraHistorico } from './midia-no-fluxo';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
+import { INSTRUCAO_COTACAO, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
@@ -173,6 +175,9 @@ interface ProviderResult {
 export const MENSAGEM_VALOR_A_CONFIRMAR =
   'Vou confirmar esse valor certinho com a equipe e já te retorno por aqui 😊';
 
+/** Instrução dos marcadores de cotação (agents/cotacao.ts), só para agente com a chave ligada. */
+const instrucaoCotacao = (req: ChatRequest): string => (req.cotacao?.ligado ? INSTRUCAO_COTACAO : '');
+
 const normalizarTexto = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
 /**
@@ -214,10 +219,6 @@ async function reescreverSemValorInventado(
   fontes: string,
   deadline: Deadline,
 ): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
-  const modelo = provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
-  // Mesmo corte do runAnthropic, para reaproveitar o cache da persona; na OpenAI vai inteiro.
-  const corte = provider === 'anthropic' ? separarSystemDoTurno(req.system_prompt) : { fixo: req.system_prompt, doTurno: '' };
-  const system = corte.fixo + sufixoDeSaida(estilo);
   const instrucao =
     `[Instrução interna, não é do cliente: a sua resposta anterior cita ${semFonte.join(', ')}, ` +
     'e isso não aparece no retorno das ferramentas deste turno, no que já foi enviado nem no seu prompt. ' +
@@ -225,11 +226,26 @@ async function reescreverSemValorInventado(
     'usando só valores, datas e profissionais que estão no retorno abaixo. Se o que o cliente pediu não está ' +
     'no retorno, não cite número nem data: diga que vai confirmar com a equipe e transfira.]\n\n' +
     `Retorno das ferramentas e textos já enviados:\n${fontes.slice(0, 15000)}`;
+  return reescreverComInstrucao(req, history, estilo, provider, result, instrucao, deadline);
+}
+
+/** Uma chamada ao mesmo modelo, SEM ferramentas, com a resposta anterior e uma instrução interna. */
+async function reescreverComInstrucao(
+  req: ChatRequest,
+  history: ChatMessage[],
+  estilo: string | null,
+  provider: string,
+  result: ProviderResult,
+  instrucao: string,
+  deadline: Deadline,
+): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
+  const modelo = provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
+  // Mesmo corte do runAnthropic, para reaproveitar o cache da persona; na OpenAI vai inteiro.
+  const corte = provider === 'anthropic' ? separarSystemDoTurno(req.system_prompt) : { fixo: req.system_prompt, doTurno: '' };
+  const system = corte.fixo + sufixoDeSaida(estilo) + instrucaoCotacao(req);
   const conversa = [
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user' as const, content: (corte.doTurno ? `${corte.doTurno}
-
-` : '') + formatClientMessage(req.client_messages, req.client_message_type, false, req.nota_retomada) },
+    { role: 'user' as const, content: (corte.doTurno ? `${corte.doTurno}\n\n` : '') + formatClientMessage(req.client_messages, req.client_message_type, false, req.nota_retomada) },
     { role: 'assistant' as const, content: result.output || '(vazio)' },
     { role: 'user' as const, content: instrucao },
   ];
@@ -285,7 +301,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
   const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: req.system_prompt + sufixoDeSaida(estilo) },
+    { role: 'system', content: req.system_prompt + sufixoDeSaida(estilo) + instrucaoCotacao(req) },
     ...history.map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.tools?.length
@@ -372,9 +388,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   // vão com a mensagem deste turno (agents/anthropic-cache.ts `separarSystemDoTurno`).
   const { fixo: systemFixo, doTurno } = separarSystemDoTurno(req.system_prompt);
   const formattedMessage =
-    (doTurno ? `${doTurno}
-
-` : '') + formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
+    (doTurno ? `${doTurno}\n\n` : '') + formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
@@ -410,7 +424,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       model: usedModel,
       // 8192: os modelos 5.x podem raciocinar antes de responder, e isso conta aqui.
       max_tokens: 8192,
-      system: systemComCache(systemFixo + sufixoDeSaida(estilo)),
+      system: systemComCache(systemFixo + sufixoDeSaida(estilo) + instrucaoCotacao(req)),
       messages: mensagensComMarcadorNoFim(texto ? comLembrete(messages, texto) : messages),
       tools: ferramentasComCache(tools as Anthropic.Tool[]),
       tool_choice: comForca ? { type: 'any' } : { type: 'auto' },
@@ -657,7 +671,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   // Supabase quando o turno anterior acabou há até 45 s.
   // `response_style` do agente (painel → prompt_config): o n8n não manda no corpo,
   // então vem do banco, com cache curto. Falha de leitura = null = sufixo de antes.
-  const [history, cruzamento, estilo, ultimaAnterior] = await Promise.all([
+  const [history, cruzamento, estilo, ultimaAnterior, cfgCotacao] = await Promise.all([
     getHistory(scopedClientId, 18),
     config.cruzamentoMode === 'off'
       ? Promise.resolve<MotivoCruzamento | null>(null)
@@ -668,7 +682,10 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     getEstiloResposta(req.agent_id),
     // Conversa retomada depois de pausa longa (agents/retomada.ts). Falha = sem nota.
     getUltimaMensagemAnterior(req.conversation_id, new Date(Date.now() - JANELA_DO_TURNO_MS).toISOString()).catch(() => null),
+    getConfigCotacao(req.agent_id),
   ]);
+  // Cotação no código (agents/cotacao.ts): chave do agente, ou o corpo (só a suíte manda).
+  req = { ...req, cotacao: { ligado: req.cotacao_no_codigo ?? cfgCotacao.ligado, titulos: cfgCotacao.titulos } };
   const notaRetomada = notaDeRetomada(ultimaAnterior, Date.now(), history.length > 0);
   if (notaRetomada) {
     console.log(`[Retomada] conversation=${req.conversation_id} última anterior=${ultimaAnterior}`);
@@ -791,6 +808,52 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} cached=${result.tokensCached} (${pctCache}%) executorCalled=${result.executorTrace.called}`);
 
   let parsed = parseOrchestratorOutput(result.output, entregouAoCliente(result.executorTrace.tools_called));
+
+  // ── Cotação no código (agents/cotacao.ts) ─────────────────────
+  // Marcador {{preco|pix|datas:ITEM}} vira o texto exato do item que a busca devolveu
+  // neste turno. Marcador sem item: uma reescrita com a lista do que veio; se insistir,
+  // a linha sai. Nenhum "{{...}}" chega ao paciente, com a chave ligada ou não.
+  if (temMarcador(parsed.mensagens)) {
+    const catalogo = catalogoDoTurno(result.executorTrace.tools_called);
+    const titulos = req.cotacao?.titulos ?? {};
+    let cot = resolverMarcadores(parsed.mensagens, catalogo, titulos);
+    let desfechoCot = 'ok';
+    if (cot.naoResolvidos.length && !deadline.expired()) {
+      const nomes = catalogo.map((i) => i.nome);
+      const instrucao =
+        `[Instrução interna, não é do cliente: estes marcadores da sua resposta não correspondem a nenhum item que a busca trouxe neste turno: ${cot.naoResolvidos.join('; ')}. ` +
+        (nomes.length
+          ? `Itens que a busca trouxe: ${nomes.join(' | ')}. Reescreva no mesmo formato de saída usando o nome de um desses nos marcadores. `
+          : 'A busca não trouxe nenhum item com valor. ') +
+        'Se o que o cliente pediu não está entre eles, não cite valor nem data: diga que vai confirmar com a equipe e transfira.]';
+      const revisto = await reescreverComInstrucao(req, history, estilo, providerUsed, result, instrucao, deadline);
+      if (revisto && revisto.mensagens.length) {
+        cot = resolverMarcadores(revisto.mensagens, catalogo, titulos);
+        parsed = { ...revisto, mensagens: parsed.mensagens };
+        desfechoCot = cot.naoResolvidos.length ? 'reescrita_falhou' : 'reescrito';
+      } else desfechoCot = 'reescrita_falhou';
+    }
+    const semMarcador = cot.mensagens
+      .map((m) => m.split('\n').filter((l) => !/\{\{[^}]*\}\}/.test(l)).join('\n').trim())
+      .filter((m) => m.length > 0);
+    parsed = semMarcador.length
+      ? { ...parsed, mensagens: semMarcador }
+      : { mensagens: [MENSAGEM_VALOR_A_CONFIRMAR], redirect_human: true, transfer_reason: 'Cotação sem item correspondente na busca: a equipe confirma valor e datas.' };
+    console.log(`[Cotacao] resolvidos=${cot.resolvidos} naoResolvidos=${cot.naoResolvidos.length} desfecho=${desfechoCot} (lead ${req.lead_id})`);
+    if (desfechoCot !== 'ok') {
+      await logGuardShadow({
+        agent_id: req.agent_id,
+        conversation_id: req.conversation_id,
+        lead_id: req.lead_id,
+        verdict: `cotacao_${desfechoCot}`,
+        tokens: cot.naoResolvidos,
+        mensagens: parsed.mensagens,
+        tools_called: result.executorTrace.tools_called.map((t) => t.tool),
+        tipos_pedidos: catalogo.map((i) => i.nome).slice(0, 20),
+        guard_mode: 'enforce',
+      });
+    }
+  }
 
   // ── Guard de grounding (src/agents/guard.ts) ──────────────────
   // Duas checagens determinísticas, sem LLM e sem rede. Em `shadow` (padrão) só

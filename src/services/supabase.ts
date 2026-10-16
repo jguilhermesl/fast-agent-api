@@ -621,6 +621,38 @@ export async function getModeloExecutorDoAgente(agentId: string): Promise<unknow
   return modelo;
 }
 
+// ── Cotação no código (agents/cotacao.ts) ─────────────────────
+
+/**
+ * `prompt_config.cotacao_no_codigo` (bool) e `prompt_config.profissionais_titulo`
+ * ({ "Edson José": "Dr.", ... }). Cache de 60 s por agente. Falha de leitura =
+ * desligado, sem títulos: o agente segue como antes, nunca trava o turno.
+ */
+const COTACAO_TTL_MS = 60_000;
+const cotacaoCache = new Map<string, { em: number; cfg: { ligado: boolean; titulos: Record<string, string> } }>();
+
+export async function getConfigCotacao(agentId: string): Promise<{ ligado: boolean; titulos: Record<string, string> }> {
+  const cache = cotacaoCache.get(agentId);
+  if (cache && Date.now() - cache.em < COTACAO_TTL_MS) return cache.cfg;
+  try {
+    const { data, error } = await supabase.from('agents').select('prompt_config').eq('id', agentId).maybeSingle();
+    if (error) throw new Error(error.message);
+    const pc = (data?.prompt_config ?? {}) as { cotacao_no_codigo?: unknown; profissionais_titulo?: unknown };
+    const titulos: Record<string, string> = {};
+    if (pc.profissionais_titulo && typeof pc.profissionais_titulo === 'object') {
+      for (const [k, v] of Object.entries(pc.profissionais_titulo as Record<string, unknown>)) {
+        if (typeof v === 'string' && v.trim()) titulos[k] = v.trim();
+      }
+    }
+    const cfg = { ligado: pc.cotacao_no_codigo === true, titulos };
+    cotacaoCache.set(agentId, { em: Date.now(), cfg });
+    return cfg;
+  } catch (err) {
+    console.error('[Cotacao] prompt_config não lido, fica desligado:', err instanceof Error ? err.message : String(err));
+    return { ligado: false, titulos: {} };
+  }
+}
+
 // ── Estilo de resposta do agente ──────────────────────────────
 
 /**

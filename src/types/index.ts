@@ -10,6 +10,10 @@ export type ModelProvider = 'openai' | 'anthropic' | 'gemini';
 export interface ChatRequest {
   /** Interno (agents/retomada.ts): nota de conversa retomada após pausa longa. Nunca vem no corpo. */
   nota_retomada?: string | null;
+  /** Interno (agents/cotacao.ts): chave e títulos do agente, resolvidos no turno. Nunca vem no corpo. */
+  cotacao?: { ligado: boolean; titulos: Record<string, string> };
+  /** Corpo do /api/chat, só a suíte manda: liga a cotação no código sem mexer na configuração do agente. */
+  cotacao_no_codigo?: boolean;
   agent_id: string;
   conversation_id: string;
   lead_id: string;
