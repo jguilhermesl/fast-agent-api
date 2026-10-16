@@ -181,6 +181,24 @@ export async function getMensagensDaConversa(
  * achar a última fala do cliente e o que veio depois dela; o `.limit` com ordem
  * crescente de `getMensagensDaConversa` devolveria as mais velhas da janela.
  */
+/**
+ * Data da última mensagem da conversa (cliente, IA ou equipe; sem as de sistema)
+ * anterior a `antesDeIso`. Serve para saber se a conversa foi retomada depois de
+ * pausa longa (agents/retomada.ts). Erro de leitura sobe para quem chamou.
+ */
+export async function getUltimaMensagemAnterior(conversationId: string, antesDeIso: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('created_at')
+    .eq('conversation_id', conversationId)
+    .neq('message_type', 'system')
+    .lt('created_at', antesDeIso)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`getUltimaMensagemAnterior: ${error.message}`);
+  return (data?.[0]?.created_at as string | undefined) ?? null;
+}
+
 export async function getUltimasMensagensDaConversa(
   conversationId: string,
   desdeIso: string,

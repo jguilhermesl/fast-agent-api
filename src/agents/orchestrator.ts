@@ -20,11 +20,13 @@ import {
   getMensagensDaConversa,
   getEstadoDoLead,
   getUltimasMensagensDaConversa,
+  getUltimaMensagemAnterior,
   getBufferDelayMs,
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { midiasAdiadas, intercalarMidias, paraHistorico } from './midia-no-fluxo';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
+import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
@@ -88,9 +90,12 @@ const modelosSemFerramentaForcada = new Set<string>();
 // Garante que o LLM entenda que análises de imagem/áudio não são textos digitados pelo cliente.
 
 // `nota`: o cliente escreveu antes de receber a resposta anterior (agents/cruzamento.ts).
-function formatClientMessage(content: string, type?: string, nota = false): string {
+function formatClientMessage(content: string, type?: string, nota = false, retomada?: string | null): string {
   const formatado = formatarPorTipo(content, type);
-  return nota ? comNotaDeCruzamento(formatado) : formatado;
+  const comCruzamento = nota ? comNotaDeCruzamento(formatado) : formatado;
+  return retomada ? `${retomada}
+
+${comCruzamento}` : comCruzamento;
 }
 
 function formatarPorTipo(content: string, type?: string): string {
@@ -220,7 +225,7 @@ async function reescreverSemValorInventado(
     `Retorno das ferramentas e textos já enviados:\n${fontes.slice(0, 15000)}`;
   const conversa = [
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user' as const, content: formatClientMessage(req.client_messages, req.client_message_type) },
+    { role: 'user' as const, content: formatClientMessage(req.client_messages, req.client_message_type, false, req.nota_retomada) },
     { role: 'assistant' as const, content: result.output || '(vazio)' },
     { role: 'user' as const, content: instrucao },
   ];
@@ -273,7 +278,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
-  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota);
+  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: req.system_prompt + sufixoDeSaida(estilo) },
@@ -359,7 +364,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !isGreetingOrFarewell(req.client_messages);
-  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota);
+  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 
   type AnthropicMsg = Anthropic.MessageParam;
   const messages: AnthropicMsg[] = [
@@ -642,7 +647,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   // Supabase quando o turno anterior acabou há até 45 s.
   // `response_style` do agente (painel → prompt_config): o n8n não manda no corpo,
   // então vem do banco, com cache curto. Falha de leitura = null = sufixo de antes.
-  const [history, cruzamento, estilo] = await Promise.all([
+  const [history, cruzamento, estilo, ultimaAnterior] = await Promise.all([
     getHistory(scopedClientId, 18),
     config.cruzamentoMode === 'off'
       ? Promise.resolve<MotivoCruzamento | null>(null)
@@ -651,7 +656,14 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
           { scopedClientId, conversationId: req.conversation_id, esperouNaFila: vez.concorrente },
         ),
     getEstiloResposta(req.agent_id),
+    // Conversa retomada depois de pausa longa (agents/retomada.ts). Falha = sem nota.
+    getUltimaMensagemAnterior(req.conversation_id, new Date(Date.now() - JANELA_DO_TURNO_MS).toISOString()).catch(() => null),
   ]);
+  const notaRetomada = notaDeRetomada(ultimaAnterior, Date.now(), history.length > 0);
+  if (notaRetomada) {
+    console.log(`[Retomada] conversation=${req.conversation_id} última anterior=${ultimaAnterior}`);
+    req = { ...req, nota_retomada: notaRetomada };
+  }
   const nota = cruzamento !== null && config.cruzamentoMode === 'nota';
   if (cruzamento) {
     console.log(`[Cruzamento] conversation=${req.conversation_id} motivo=${cruzamento} modo=${config.cruzamentoMode}`);

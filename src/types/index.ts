@@ -8,6 +8,8 @@ export type ModelProvider = 'openai' | 'anthropic' | 'gemini';
 
 // Payload que chega do n8n via POST /api/chat
 export interface ChatRequest {
+  /** Interno (agents/retomada.ts): nota de conversa retomada após pausa longa. Nunca vem no corpo. */
+  nota_retomada?: string | null;
   agent_id: string;
   conversation_id: string;
   lead_id: string;
