@@ -408,6 +408,8 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   const communications: Array<{ query: string; result: string }> = [];
 
   let lembreteFirmeUsado = false;
+  // Cópia do começo (histórico + mensagem do cliente), para a resposta final sem ferramentas.
+  const conversaInicial: AnthropicMsg[] = [...messages];
   let chamadasExecutor = 0;
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (deadline.expired()) throw new DeadlineExceededError(`orquestrador Anthropic round ${round + 1}`);
@@ -530,6 +532,41 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     });
   }
 
+  // Esgotou as rodadas pedindo ferramenta (16/10/2026: 1 turno real e 2 de teste caíram
+  // no gpt-5.4 assim, com o paciente esperando ~37 s). Antes de desistir do provedor,
+  // uma chamada SEM ferramentas, com o que os executores devolveram como texto.
+  if (!deadline.expired()) {
+    const retornos = communications.map((c) => c.result).join('\n---\n').slice(0, 15000);
+    const instrucao =
+      '[Instrução interna, não é do cliente: as buscas deste turno já voltaram e estão abaixo. ' +
+      'Responda agora ao cliente, no formato de saída, só com o que está aí. Se faltar dado, diga que a equipe confirma.]\n\n' +
+      (retornos || '(nenhum retorno)');
+    const msgsFinais = comLembrete(conversaInicial, instrucao);
+    const final = await anthropic.messages.create({
+      model: usedModel,
+      max_tokens: 8192,
+      system: systemComCache(systemFixo + sufixoDeSaida(estilo) + instrucaoCotacao(req)),
+      messages: mensagensComMarcadorNoFim(msgsFinais),
+    }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+    const usoFinal = final.usage as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+    totalIn += final.usage.input_tokens + (usoFinal.cache_read_input_tokens ?? 0) + (usoFinal.cache_creation_input_tokens ?? 0);
+    totalOut += final.usage.output_tokens;
+    totalCached += usoFinal.cache_read_input_tokens ?? 0;
+    const texto = final.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('');
+    if (texto.trim()) {
+      console.warn(`[Orchestrator] ${usedModel} esgotou as rodadas: resposta final sem ferramentas`);
+      return {
+        output: texto,
+        tokensIn: totalIn,
+        tokensOut: totalOut,
+        tokensCached: totalCached,
+        model: usedModel,
+        rounds: rounds + 1,
+        executorTrace: mergeExecutorTraces(allExecutorTraces),
+        communications,
+      };
+    }
+  }
   throw new Error('Anthropic orchestrator hit max rounds');
 }
 
