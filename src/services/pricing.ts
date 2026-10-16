@@ -68,6 +68,12 @@ export const TARIFAS_POR_1M: Record<string, Tarifa> = {
   'gpt-4o':       { input: 2.5,  output: 10,  cached: 1.25  },
   'gpt-4o-mini':  { input: 0.15, output: 0.6, cached: 0.075 },
   // ── Anthropic ─────────────────────────────────────────────
+  // Família 5.5 (tarifa publicada no OpenRouter em 16/10/2026, mesmo preço da
+  // Anthropic). Sem estas linhas o prefixo `claude-sonnet` cobrava a tabela antiga
+  // (3/15). A escrita de cache (1,25x) não entra aqui; ver orchestrator.ts.
+  'claude-haiku-5-5':  { input: 0.1, output: 0.5,  cached: 0.01 },
+  'claude-sonnet-5-5': { input: 2,   output: 10,   cached: 0.1  },
+  'claude-opus-5-5':   { input: 4,   output: 20,   cached: 0.2  },
   'claude-opus':     { input: 15,  output: 75, cached: 1.5 },
   'claude-opus-4':   { input: 15,  output: 75, cached: 1.5 },
   'claude-sonnet':   { input: 3,   output: 15, cached: 0.3 },

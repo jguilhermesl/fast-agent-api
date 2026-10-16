@@ -30,6 +30,7 @@ import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
+import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, TURN_BUDGET_MS, type Deadline } from '../services/deadline';
@@ -58,6 +59,9 @@ const openai    = new OpenAI({ apiKey: config.openaiApiKey, timeout: LLM_TIMEOUT
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey, timeout: LLM_TIMEOUT_MS, maxRetries: 1 });
 
 const MAX_TOOL_ROUNDS = 5;
+
+/** Modelo OpenAI usado quando o provedor principal (Anthropic) falha. */
+const MODELO_FALLBACK_OPENAI = 'gpt-5.4';
 
 // Detecção de saudação/despedida pura: `./saudacao.ts` (função pura, com teste).
 // Mensagens curtas de cumprimento não precisam de busca na base de conhecimento.
@@ -266,27 +270,28 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     // Round 0: força o executor (exceto em saudações/despedidas)
     const toolChoice: Anthropic.MessageCreateParams['tool_choice'] =
       (round === 0 && forceExecutor) ? { type: 'any' } : { type: 'auto' };
+    // Cache de prompt (agents/anthropic-cache.ts): ferramentas, system e o fim da
+    // conversa vão marcados com `cache_control`; sem isso cada rodada pagava o prompt
+    // inteiro. A cópia marcada é montada a cada chamada, `messages` segue sem marca.
     const response = await anthropic.messages.create({
       model: usedModel,
       max_tokens: 4096,
-      system: req.system_prompt + sufixoDeSaida(estilo),
-      messages,
-      tools: tools as Anthropic.Tool[],
+      system: systemComCache(req.system_prompt + sufixoDeSaida(estilo)),
+      messages: mensagensComMarcadorNoFim(messages),
+      tools: ferramentasComCache(tools as Anthropic.Tool[]),
       tool_choice: toolChoice,
     }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
 
     totalIn  += response.usage.input_tokens;
     totalOut += response.usage.output_tokens;
-    // Na Anthropic o input cacheado vem FORA de `input_tokens` (ao contrário da
-    // OpenAI), então soma nos dois: no total de input e no contador de cache.
-    //
-    // O cast é necessário porque o SDK fixado (^0.27.0, de 2024) não declara o campo
-    // no tipo `Usage` — ele veio depois. Na prática este valor deve ser 0 hoje: o
-    // cache da Anthropic exige `cache_control` nos blocos, que este código não envia.
-    // Fica lendo mesmo assim para não precisar mexer aqui quando/se isso mudar.
-    const anthropicCached =
-      (response.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0;
-    totalIn     += anthropicCached;
+    // Na Anthropic o input cacheado (lido e escrito) vem FORA de `input_tokens`, ao
+    // contrário da OpenAI: soma os dois no total de input e o lido no contador de
+    // cache. O escrito custa 1,25x e entra aqui pela tarifa cheia (subestima 25%
+    // da escrita, que só acontece na primeira chamada de cada prefixo).
+    // O cast é porque o SDK fixado (^0.27.0) não declara esses campos em `Usage`.
+    const uso = response.usage as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+    const anthropicCached = uso.cache_read_input_tokens ?? 0;
+    totalIn     += anthropicCached + (uso.cache_creation_input_tokens ?? 0);
     totalCached += anthropicCached;
 
     if (response.stop_reason !== 'tool_use') {
@@ -549,10 +554,25 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     }
 
     if (req.model_provider !== 'openai') {
+      // A falha do provedor principal fica registrada MESMO quando o fallback
+      // responde. Antes só gravava se os dois falhassem, e Priscila e Dani rodaram
+      // semanas caladas em gpt-4.1-mini com a chave da Anthropic dando 401. Com o
+      // registro, o alerta de crédito do n8n (agent_error_logs) também enxerga o
+      // saldo da Anthropic acabando.
+      await logError({
+        conversation_id: req.conversation_id,
+        agent_id: req.agent_id,
+        lead_id: req.lead_id,
+        error_message: `Primary ${req.model_provider}/${req.model_name}: ${errMsg} | usando fallback openai/${MODELO_FALLBACK_OPENAI}`,
+        provider_failed: req.model_provider,
+        layer: 'orchestrator-fallback',
+      });
       try {
         console.log('[Orchestrator] Trying OpenAI fallback...');
         providerUsed = 'openai';
-        result = await runOpenAI({ ...req, model_name: 'gpt-4.1-mini' }, history, deadline, nota, estilo);
+        // gpt-5.4: o modelo em que os agentes foram validados. O gpt-4.1-mini de
+        // antes respondia, mas pior, e ninguém percebia (ver logError acima).
+        result = await runOpenAI({ ...req, model_name: MODELO_FALLBACK_OPENAI }, history, deadline, nota, estilo);
       } catch (fallbackErr) {
         const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         await logError({
