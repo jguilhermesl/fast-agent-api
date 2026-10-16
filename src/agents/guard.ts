@@ -139,6 +139,118 @@ export function checarGrounding(input: {
   };
 }
 
+// ── 1b. Valor e data sem fonte, para BLOQUEAR (não só registrar) ─────────
+//
+// 13/10/2026 (Duda, lead 18ac4f90): a busca devolveu o preventivo a R$ 150 com
+// Raiany 15/10, Amanda 19/10, Sandrele 24/10 e Aline 27/10; a resposta saiu
+// "R$ 100,00, Aline Cordeiro sexta 16/10 e 23/10". `checarGrounding` marcou os
+// três tokens (10000, 1610, 2310) e nada aconteceu: o bloqueio só valia sem
+// ferramenta no turno, e o modo era shadow. Medido em 30 dias: 23 alertas, ao
+// menos 6 preços inventados (preventivo R$ 100, neuropediatria R$ 250, sexagem
+// R$ 100, endoscopia R$ 250/280 duas vezes); o resto, soma ou parcela de valores
+// certos, horário de coleta e valor repetido de turno anterior.
+//
+// Daqui sai só o que vale bloquear: dinheiro e data (horário fica de fora, era
+// a maior fonte de falso positivo), menos o dinheiro que é soma ou parcela de
+// valores que têm fonte (o "Total: R$ 68,50" de quatro exames certos).
+
+export interface ValorSemFonte {
+  tipo: 'dinheiro' | 'data';
+  /** Como saiu na resposta, para citar na instrução de reescrita. */
+  texto: string;
+  canonico: string;
+}
+
+const MAX_PARCELAS = 12;
+const MAX_POOL_SOMA = 14;
+
+/** Algum subconjunto (2 ou mais) de `pool` soma `alvo`? Tolerância de 1 centavo. */
+function ehSomaDe(alvo: number, pool: number[]): boolean {
+  // Sem deduplicar: "hemograma R$ 15 + creatinina R$ 15" precisa dos dois 15.
+  const p = pool.filter((v) => v > 0 && v < alvo).slice(0, MAX_POOL_SOMA);
+  const n = p.length;
+  for (let mask = 1; mask < 1 << n; mask++) {
+    if ((mask & (mask - 1)) === 0) continue; // um elemento só não é soma
+    let s = 0;
+    for (let i = 0; i < n; i++) if (mask & (1 << i)) s += p[i];
+    if (Math.abs(s - alvo) <= 1) return true;
+  }
+  return false;
+}
+
+/** `alvo` é parcela (valor / n, 2 ≤ n ≤ 12) de algum valor do pool? */
+function ehParcelaDe(alvo: number, pool: number[]): boolean {
+  return pool.some((v) => {
+    for (let n = 2; n <= MAX_PARCELAS; n++) if (Math.abs(v / n - alvo) <= 1) return true;
+    return false;
+  });
+}
+
+function centavosDoTexto(texto: string): number[] {
+  RE_DINHEIRO.lastIndex = 0;
+  return [...texto.matchAll(RE_DINHEIRO)]
+    .map((m) => dinheiroEmCentavos(m[0]))
+    .filter((c): c is string => !!c)
+    .map(Number);
+}
+
+export function checarValoresSemFonte(input: {
+  mensagens: string[];
+  toolResults: string;
+  clientMessage: string;
+  history: string;
+  systemPrompt: string;
+}): ValorSemFonte[] {
+  const corpus = [input.toolResults, input.clientMessage, input.history, input.systemPrompt].join(' ');
+  const canonicos = new Set(extrairTokens(corpus));
+  const sopa = norm(corpus);
+  const temFonte = (t: string) => canonicos.has(t) || sopa.includes(t);
+  const resposta = input.mensagens.join('\n');
+
+  const valores: Array<{ texto: string; centavos: number; canonico: string; ok: boolean }> = [];
+  RE_DINHEIRO.lastIndex = 0;
+  for (const m of resposta.matchAll(RE_DINHEIRO)) {
+    const c = dinheiroEmCentavos(m[0]);
+    if (!c || c.length < 3 || c.length > 8) continue;
+    valores.push({ texto: m[0].trim(), centavos: Number(c), canonico: c, ok: temFonte(c) });
+  }
+
+  // Soma e parcela: de valores com fonte na resposta e do histórico confiável
+  // ("pelos valores que te passei, o total fica R$ 470"). Repete até estabilizar,
+  // porque "total com o pacote" pode ser soma de um subtotal que também é soma.
+  const doHistorico = centavosDoTexto(input.history).slice(-MAX_POOL_SOMA);
+  let mudou = true;
+  while (mudou) {
+    mudou = false;
+    const pool = [...valores.filter((v) => v.ok).map((v) => v.centavos), ...doHistorico];
+    for (const v of valores) {
+      if (!v.ok && (ehSomaDe(v.centavos, pool) || ehParcelaDe(v.centavos, pool))) {
+        v.ok = true;
+        mudou = true;
+      }
+    }
+  }
+
+  const out: ValorSemFonte[] = [];
+  const vistos = new Set<string>();
+  for (const v of valores) {
+    if (v.ok || vistos.has(v.canonico)) continue;
+    vistos.add(v.canonico);
+    out.push({ tipo: 'dinheiro', texto: v.texto, canonico: v.canonico });
+  }
+
+  RE_DATA.lastIndex = 0;
+  for (const m of resposta.matchAll(RE_DATA)) {
+    const dia = Number(m[1]), mes = Number(m[2]);
+    if (dia < 1 || dia > 31 || mes < 1 || mes > 12) continue;
+    const canonico = pad2(m[1]) + pad2(m[2]);
+    if (temFonte(canonico) || vistos.has(canonico)) continue;
+    vistos.add(canonico);
+    out.push({ tipo: 'data', texto: m[0], canonico });
+  }
+  return out;
+}
+
 /**
  * Monta a parte do corpus que vem do histórico — e é aqui que a primeira versão
  * do guard morria.

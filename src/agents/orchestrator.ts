@@ -25,7 +25,7 @@ import {
 import { runExecutor } from './executor';
 import { midiasAdiadas, intercalarMidias, paraHistorico } from './midia-no-fluxo';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
-import { checarGrounding, checarTarefaSemFerramenta, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
+import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
 import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
@@ -160,6 +160,112 @@ interface ProviderResult {
   rounds: number;
   executorTrace: ExecutorTrace;
   communications: Array<{ query: string; result: string }>;
+}
+
+// ── Valor sem fonte: fontes de fora e reescrita ───────────────
+
+/** Texto curto de quando a reescrita não tirou o valor sem fonte: transfere sem citar número. */
+export const MENSAGEM_VALOR_A_CONFIRMAR =
+  'Vou confirmar esse valor certinho com a equipe e já te retorno por aqui 😊';
+
+const normalizarTexto = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * O que foi enviado ao paciente nesta conversa sem passar pelo Orquestrador:
+ * texto pronto das intenções `enviar_detalhes_*` (o n8n manda, e o modelo só
+ * recebe "Workflow was started") e fala da equipe. É fonte legítima de valor:
+ * "a endoscopia fica R$ 430" depois do texto pronto da endoscopia é verdade.
+ * Fala da própria IA fica de fora (está no histórico), senão uma alucinação
+ * vira lastro de si mesma. Falha de leitura devolve vazio: a checagem fica só
+ * mais rígida, nunca mais frouxa.
+ */
+async function textosEnviadosPorFora(conversationId: string, history: ChatMessage[]): Promise<string> {
+  try {
+    const desde = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const msgs = await getUltimasMensagensDaConversa(conversationId, desde, 60);
+    const daIA = history.filter((m) => m.role === 'assistant').map((m) => normalizarTexto(m.content)).join('\n');
+    return msgs
+      .filter((m) => m.direction === 'outbound' && typeof m.content === 'string' && m.content.trim().length > 0)
+      .map((m) => m.content as string)
+      .filter((c) => !daIA.includes(normalizarTexto(c).slice(0, 120)))
+      .join('\n');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Pede ao mesmo modelo que refaça a resposta sem os valores e datas sem fonte.
+ * Uma chamada só, SEM ferramentas: refazer o turno inteiro dispararia de novo
+ * texto pronto e agendamento. Devolve null se a chamada falhar.
+ */
+async function reescreverSemValorInventado(
+  req: ChatRequest,
+  history: ChatMessage[],
+  estilo: string | null,
+  provider: string,
+  result: ProviderResult,
+  semFonte: string[],
+  fontes: string,
+  deadline: Deadline,
+): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
+  const modelo = provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
+  const system = req.system_prompt + sufixoDeSaida(estilo);
+  const instrucao =
+    `[Instrução interna, não é do cliente: a sua resposta anterior cita ${semFonte.join(', ')}, ` +
+    'e isso não aparece no retorno das ferramentas deste turno, no que já foi enviado nem no seu prompt. ' +
+    'Valor e data inventados chegam errados ao paciente. Reescreva a resposta no mesmo formato de saída, ' +
+    'usando só valores, datas e profissionais que estão no retorno abaixo. Se o que o cliente pediu não está ' +
+    'no retorno, não cite número nem data: diga que vai confirmar com a equipe e transfira.]\n\n' +
+    `Retorno das ferramentas e textos já enviados:\n${fontes.slice(0, 15000)}`;
+  const conversa = [
+    ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    { role: 'user' as const, content: formatClientMessage(req.client_messages, req.client_message_type) },
+    { role: 'assistant' as const, content: result.output || '(vazio)' },
+    { role: 'user' as const, content: instrucao },
+  ];
+  try {
+    let texto = '', tokensIn = 0, tokensOut = 0, tokensCached = 0, modeloUsado = modelo;
+    if (provider === 'anthropic') {
+      const r = await anthropic.messages.create({
+        model: modelo,
+        max_tokens: 8192,
+        system: systemComCache(system),
+        messages: mensagensComMarcadorNoFim(conversa),
+      }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+      texto = r.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('');
+      // Mesmo cast de runAnthropic: o SDK fixado não declara os campos de cache.
+      const uso = r.usage as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+      tokensIn = (r.usage.input_tokens ?? 0) + (uso.cache_read_input_tokens ?? 0) + (uso.cache_creation_input_tokens ?? 0);
+      tokensCached = uso.cache_read_input_tokens ?? 0;
+      tokensOut = r.usage.output_tokens ?? 0;
+    } else {
+      const r = await openai.chat.completions.create({
+        model: modelo,
+        messages: [{ role: 'system', content: system }, ...conversa],
+        ...amostragemDoModelo(modelo, 0.2),
+      }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+      texto = r.choices[0].message.content ?? '';
+      tokensIn = r.usage?.prompt_tokens ?? 0;
+      tokensOut = r.usage?.completion_tokens ?? 0;
+      tokensCached = r.usage?.prompt_tokens_details?.cached_tokens ?? 0;
+      modeloUsado = r.model;
+    }
+    await saveTokenUsage(buildTokenLogEntry({
+      agent_id: req.agent_id,
+      conversation_id: req.conversation_id,
+      lead_id: req.lead_id,
+      model: modeloUsado,
+      tokensIn,
+      tokensOut,
+      tokensCached,
+    }));
+    if (!texto.trim()) return null;
+    return parseOrchestratorOutput(texto, entregouAoCliente(result.executorTrace.tools_called));
+  } catch (err) {
+    console.error('[Lastro] reescrita falhou:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
 }
 
 // ── OpenAI Orchestrator ───────────────────────────────────────
@@ -709,6 +815,64 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
       `[Guard] resposta sem lastro bloqueada — tokens=${vereditoGrounding.tokens_sem_lastro.join(',')} tipos=${vereditoTarefa.tipos_pedidos.join(',')} (lead ${req.lead_id})`,
     );
     parsed = { ...parsed, mensagens: MENSAGEM_SEM_LASTRO };
+  }
+
+  // ── Valor e data sem fonte: reescreve, e se insistir transfere ──────────
+  // (guard.ts `checarValoresSemFonte`). Caso que motivou: preventivo cotado a
+  // R$ 100 com datas que a busca não trouxe (13/10/2026). Valor errado chega ao
+  // paciente e vira cobrança na recepção; transferir é melhor que isso.
+  if (config.lastroMode !== 'off' && parsed.mensagens.length) {
+    let fontes = [
+      ...result.communications.map((c) => c.result),
+      JSON.stringify(result.executorTrace.tools_called.map((t) => t.result)),
+    ].join('\n');
+    const baseLastro = {
+      toolResults: fontes,
+      clientMessage: req.client_messages,
+      history: historicoConfiavel(history),
+      systemPrompt: req.system_prompt,
+    };
+    let semFonte = checarValoresSemFonte({ ...baseLastro, mensagens: parsed.mensagens });
+    // Só lê o banco quando a primeira checagem acusou algo: turno normal não paga a consulta.
+    if (semFonte.length) {
+      fontes += '\n' + (await textosEnviadosPorFora(req.conversation_id, history));
+      baseLastro.toolResults = fontes;
+      semFonte = checarValoresSemFonte({ ...baseLastro, mensagens: parsed.mensagens });
+    }
+    if (semFonte.length) {
+      const lista = semFonte.map((v) => v.texto);
+      let desfecho: 'shadow' | 'reescrito' | 'transferido' = 'shadow';
+      const mensagensOriginais = parsed.mensagens;
+      if (config.lastroMode === 'enforce') {
+        const revisto = deadline.expired()
+          ? null
+          : await reescreverSemValorInventado(req, history, estilo, providerUsed, result, lista, fontes, deadline);
+        const restou = revisto ? checarValoresSemFonte({ ...baseLastro, mensagens: revisto.mensagens }) : semFonte;
+        if (revisto && revisto.mensagens.length && restou.length === 0) {
+          parsed = revisto;
+          desfecho = 'reescrito';
+        } else {
+          parsed = {
+            mensagens: [MENSAGEM_VALOR_A_CONFIRMAR],
+            redirect_human: true,
+            transfer_reason: `Valor ou data sem confirmação no sistema (${lista.join(', ')}): a equipe confirma com o paciente.`,
+          };
+          desfecho = 'transferido';
+        }
+      }
+      console.warn(`[Lastro] ${desfecho}: ${lista.join(', ')} (lead ${req.lead_id})`);
+      await logGuardShadow({
+        agent_id: req.agent_id,
+        conversation_id: req.conversation_id,
+        lead_id: req.lead_id,
+        verdict: `valor_sem_fonte_${desfecho}`,
+        tokens: semFonte.map((v) => v.canonico),
+        mensagens: desfecho === 'shadow' ? mensagensOriginais : [...mensagensOriginais, '--- enviado ---', ...parsed.mensagens],
+        tools_called: result.executorTrace.tools_called.map((t) => t.tool),
+        tipos_pedidos: semFonte.map((v) => v.tipo),
+        guard_mode: config.lastroMode,
+      });
+    }
   }
 
   // Guard de agendamento: a resposta não pode afirmar que o horário está marcado

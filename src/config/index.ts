@@ -32,6 +32,14 @@ export const config = {
   // shadow calibrados (SPEC-02 §7).
   guardMode: (process.env.GUARD_MODE === 'enforce' ? 'enforce' : 'shadow') as 'shadow' | 'enforce',
 
+  // Valor e data sem fonte (guard.ts `checarValoresSemFonte`): `enforce` (padrão)
+  // pede ao modelo que reescreva e, se insistir, transfere; `shadow` só registra;
+  // `off` nem confere. Ligado por padrão desde 16/10/2026: preço inventado chegou
+  // ao paciente (preventivo R$ 100, endoscopia R$ 250) com o shadow anotando tudo.
+  lastroMode: (['shadow', 'off'].includes(process.env.LASTRO_MODE ?? '')
+    ? process.env.LASTRO_MODE
+    : 'enforce') as 'enforce' | 'shadow' | 'off',
+
   // Mensagem cruzada (src/agents/cruzamento.ts). `nota` avisa o modelo que o
   // cliente escreveu antes de receber a resposta anterior; `log` só detecta e
   // loga; `off` nem consulta. Env var pelo mesmo motivo do GUARD_MODE: voltar
