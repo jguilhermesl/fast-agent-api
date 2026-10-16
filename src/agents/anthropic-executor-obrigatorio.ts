@@ -53,3 +53,22 @@ export function ehRecusaDeFerramentaForcada(erro: unknown): boolean {
   const texto = String((erro as { message?: string })?.message ?? erro);
   return (status === undefined || status === 400) && /tool_choice/i.test(texto) && /not supported/i.test(texto);
 }
+
+/**
+ * O Claude às vezes ESCREVE a chamada em vez de fazê-la: devolve como texto o array de
+ * tarefas (```json [{"tipo":"CONSULTA","objetivo":...}] ```). Visto em 16/10/2026 num
+ * teste ("Quero consulta com clínico geral"): o array iria ao paciente como mensagem.
+ * Devolve as tarefas quando o texto inteiro é esse array; senão null.
+ */
+export function tarefasEscritasComoTexto(texto: string): unknown[] | null {
+  const t = texto.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  if (!t.startsWith('[') || !t.endsWith(']')) return null;
+  try {
+    const arr = JSON.parse(t);
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const pareceTarefa = (x: unknown) => !!x && typeof x === 'object' && ('objetivo' in (x as object) || 'tipo' in (x as object));
+    return arr.every(pareceTarefa) ? arr : null;
+  } catch {
+    return null;
+  }
+}

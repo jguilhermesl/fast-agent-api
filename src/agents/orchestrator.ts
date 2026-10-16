@@ -36,6 +36,7 @@ import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, separarSystemDoTurno } from './anthropic-cache';
 import {
+  tarefasEscritasComoTexto,
   comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME,
   LEMBRETE_RESPONDER, MAX_CHAMADAS_EXECUTOR_ANTHROPIC, EXECUTOR_NAO_CHAMADO,
 } from './anthropic-executor-obrigatorio';
@@ -458,6 +459,21 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       console.warn(`[Orchestrator] ${usedModel} respondeu sem chamar o executor na rodada 0: repetindo com lembrete firme`);
       round -= 1;
       continue;
+    }
+
+    // Tarefas escritas como texto em vez de chamada (anthropic-executor-obrigatorio.ts):
+    // vira a chamada que o modelo quis fazer, em vez de ir ao paciente como mensagem.
+    if (response.stop_reason !== 'tool_use') {
+      const blocoTexto = response.content.find((b) => b.type === 'text');
+      const tarefas = blocoTexto?.type === 'text' ? tarefasEscritasComoTexto(blocoTexto.text) : null;
+      if (tarefas && chamadasExecutor < MAX_CHAMADAS_EXECUTOR_ANTHROPIC) {
+        console.warn(`[Orchestrator] ${usedModel} escreveu as tarefas como texto: executando como chamada`);
+        response = {
+          ...response,
+          stop_reason: 'tool_use',
+          content: [{ type: 'tool_use', id: `toolu_sintetico_${Date.now()}`, name: 'chamar_executor', input: { tasks: tarefas } } as unknown as Anthropic.ContentBlock],
+        };
+      }
     }
 
     if (response.stop_reason !== 'tool_use') {

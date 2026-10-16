@@ -25,3 +25,17 @@ describe('executor obrigatório na Anthropic', () => {
     expect(ehRecusaDeFerramentaForcada(Object.assign(new Error('529 overloaded tool_choice not supported'), { status: 529 }))).toBe(false);
   });
 });
+
+import { tarefasEscritasComoTexto } from './anthropic-executor-obrigatorio';
+
+describe('tarefasEscritasComoTexto', () => {
+  it('caso real de 16/10: array de tarefas em bloco json vira tarefas', () => {
+    const texto = '```json\n[\n  {"tipo": "CONSULTA", "objetivo": "Buscar valor e datas do Clínico Geral"},\n  {"tipo": "CRM", "objetivo": "Atualizar estágio"}\n]\n```';
+    expect(tarefasEscritasComoTexto(texto)).toHaveLength(2);
+  });
+  it('resposta normal ao cliente não é tarefa', () => {
+    expect(tarefasEscritasComoTexto('{"mensagens":["Oi"],"redirect_human":false}')).toBeNull();
+    expect(tarefasEscritasComoTexto('Clínico Geral: R$ 85')).toBeNull();
+    expect(tarefasEscritasComoTexto('[1, 2]')).toBeNull();
+  });
+});
