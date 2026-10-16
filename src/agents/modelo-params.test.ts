@@ -21,6 +21,18 @@ describe('amostragemDoModelo', () => {
     }
   });
 
+  // Medido em 16/10/2026: gpt-6-luna dá o mesmo 400 com temperature + tools e
+  // responde com reasoning_effort='none'. gpt-6-sol e gpt-6.1-sol recusam 'none'
+  // (só low/medium/high) e com tools exigem /v1/responses: continuam no ramo de
+  // temperature, onde o 400 é o mesmo que já seria hoje.
+  it('trata gpt-6-luna como a familia 5.6, e só ele da familia 6', () => {
+    expect(amostragemDoModelo('gpt-6-luna', 0.2)).toEqual({ reasoning_effort: 'none' });
+    expect(amostragemDoModelo('gpt-6-luna-2026-09-22', 0.2)).toEqual({ reasoning_effort: 'none' });
+    for (const m of ['gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-astra']) {
+      expect(amostragemDoModelo(m, 0.2)).toEqual({ temperature: 0.2 });
+    }
+  });
+
   it('não confunde 5.6 com um prefixo parecido', () => {
     expect(amostragemDoModelo('gpt-5.62-qualquer', 0.3)).toEqual({ temperature: 0.3 });
   });

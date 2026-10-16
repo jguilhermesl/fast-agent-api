@@ -25,6 +25,12 @@
  *
  * Quem quiser gpt-5.6 COM raciocínio precisa migrar a chamada para
  * `/v1/responses`, que é outro contrato de request e de parsing de tool call.
+ *
+ * **gpt-6-luna** se comporta igual (medido em 16/10/2026: `temperature` + tools
+ * dá o mesmo 400; `reasoning_effort: 'none'` + tools responde e chama a tool).
+ * **gpt-6-sol e gpt-6.1-sol ficam de fora de propósito:** recusam `'none'`
+ * ("Supported values are: 'low', 'medium', 'high'...") e com tools só funcionam
+ * em `/v1/responses`. Mandar `'none'` para eles só trocaria um 400 por outro.
  */
 import type OpenAI from 'openai';
 
@@ -34,7 +40,7 @@ type Amostragem = Pick<
 >;
 
 export function amostragemDoModelo(modelo: string, temperature: number): Amostragem {
-  if (/^gpt-5\.6\b/.test(modelo)) {
+  if (/^gpt-5\.6\b/.test(modelo) || /^gpt-6-luna\b/.test(modelo)) {
     // A API aceita `'none'` desde a família 5.6, mas o `ReasoningEffort` do SDK
     // instalado ainda não o lista. O cast fica restrito a este ponto: subir a
     // versão do SDK só por causa de um literal de string mexeria no contrato de
