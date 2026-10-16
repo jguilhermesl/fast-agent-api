@@ -147,3 +147,14 @@ describe('cotação: achados da revisão de 16/10', () => {
     expect(blocoDeDatas(cat[0], {})).toBe('123\n• Sábado, 31/10');
   });
 });
+
+describe('cotação: envelope real do intent-dispatcher', () => {
+  it('desce por status/data/data até a lista de itens', () => {
+    const envelope = { status: 'ok', http_status: 200, data: { success: true, status: 200, intent: { slug: 'conferir_especialidades' }, data: [
+      { nome: 'Prevenção, Preventivo, Prevenção Completa, Papanicolau, Citologia + Colposcopia', preco: 'R$ 150,00 (Sem direito a retorno)', disponibilidades: [] },
+    ] } };
+    const cat = catalogoDoTurno([{ tool: 'conferir_especialidades', result: envelope }, { tool: 'atualizar_lead_crm', result: { status: 'error', data: { error: 'x' } } }]);
+    expect(cat.map((i) => i.preco)).toEqual(['R$ 150,00 (Sem direito a retorno)']);
+    expect(resolverMarcadores(['• Valor: {{preco:Prevenção completa}}'], cat).mensagens).toEqual(['• Valor: R$ 150,00 (Sem direito a retorno)']);
+  });
+});

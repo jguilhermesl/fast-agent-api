@@ -80,7 +80,14 @@ export function catalogoDoTurno(toolsCalled: Array<{ tool: string; result: unkno
     if (typeof r === 'string') {
       try { r = JSON.parse(r); } catch { continue; }
     }
-    const lista = Array.isArray(r) ? r : Array.isArray((r as { data?: unknown })?.data) ? (r as { data: unknown[] }).data : null;
+    // O intent-dispatcher embrulha: {status, http_status, data: {success, intent, data: [itens]}}.
+    // Desce por `data` até achar a lista (no máximo 4 níveis).
+    let lista: unknown[] | null = null;
+    for (let nivel = 0; nivel < 4 && r && typeof r === 'object'; nivel++) {
+      if (Array.isArray(r)) { lista = r; break; }
+      r = (r as { data?: unknown }).data;
+    }
+    if (!lista && Array.isArray(r)) lista = r;
     if (!lista) continue;
     for (const bruto of lista) {
       if (!bruto || typeof bruto !== 'object') continue;
