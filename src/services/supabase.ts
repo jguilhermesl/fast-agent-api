@@ -578,6 +578,31 @@ export async function getMidiaNoFluxo(agentId: string): Promise<boolean> {
   return ligado;
 }
 
+// ── Modelo do Executor por agente ─────────────────────────────
+
+/**
+ * `agents.prompt_config.executor_model` cru (quem valida é
+ * agents/modelo-executor.ts). Cache de 60 s por agente, como o estilo de
+ * resposta: trocar o campo chega aqui em até 1 min. Falha de leitura devolve
+ * `undefined`, que vira o modelo padrão — nunca trava o turno por isso.
+ */
+const MODELO_EXECUTOR_TTL_MS = 60_000;
+const modeloExecutorCache = new Map<string, { em: number; modelo: unknown }>();
+
+export async function getModeloExecutorDoAgente(agentId: string): Promise<unknown> {
+  const cache = modeloExecutorCache.get(agentId);
+  if (cache && Date.now() - cache.em < MODELO_EXECUTOR_TTL_MS) return cache.modelo;
+  let modelo: unknown = undefined;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    modelo = (ag?.prompt_config as { executor_model?: unknown } | null)?.executor_model;
+  } catch (err) {
+    console.error('[Executor] prompt_config não lido, fica o modelo padrão:', err instanceof Error ? err.message : String(err));
+  }
+  modeloExecutorCache.set(agentId, { em: Date.now(), modelo });
+  return modelo;
+}
+
 // ── Estilo de resposta do agente ──────────────────────────────
 
 /**

@@ -105,6 +105,16 @@ describe('calcCostUsd — desconto de tokens cacheados', () => {
     expect(t56.input).toBeLessThan(t54.input);
     expect(t56.output).toBeLessThan(t54.output);
   });
+
+  // Candidatos de 16/10/2026 para baratear a Duda. Sem a linha caíam na
+  // TARIFA_DESCONHECIDA (1/3), 10x acima do gpt-6-luna real.
+  it('conhece gpt-6-luna e gpt-5.6-luna, e o prefixo não se confunde com terra/mini', () => {
+    expect(tarifaDe('gpt-6-luna')).toEqual({ input: 0.1, output: 0.5, cached: 0.01 });
+    expect(tarifaDe('gpt-6-luna-2026-09-22')).toEqual({ input: 0.1, output: 0.5, cached: 0.01 });
+    expect(tarifaDe('gpt-5.6-luna')).toEqual({ input: 0.2, output: 1.2, cached: 0.02 });
+    expect(tarifaDe('gpt-5.6-terra').input).toBe(2);
+    expect(tarifaDe('gpt-6-luna').input).toBeLessThan(tarifaDe('gpt-5.4-mini').input);
+  });
 });
 
 describe('buildTokenLogEntry — pricing_version (SPEC-01)', () => {

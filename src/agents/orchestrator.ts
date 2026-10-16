@@ -225,6 +225,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
         client_messages: req.client_messages,
         conversation_context: conversationContext,
         deadline,
+        model: req.executor_model,
       });
       allExecutorTraces.push(executorResult.trace);
       communications.push({ query, result: executorResult.result });
@@ -320,6 +321,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
         client_messages: req.client_messages,
         conversation_context: conversationContext,
         deadline,
+        model: req.executor_model,
       });
       allExecutorTraces.push(executorResult.trace);
       communications.push({ query, result: executorResult.result });

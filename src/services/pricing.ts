@@ -53,6 +53,11 @@ export const TARIFAS_POR_1M: Record<string, Tarifa> = {
   // output e cache. Sem esta linha o modelo caía em TARIFA_DESCONHECIDA (1/3) e o
   // custo no painel virava ficção — justamente no modelo adotado para baratear.
   'gpt-5.6-terra': { input: 2,    output: 12,  cached: 0.2   },
+  // gpt-5.6-luna e gpt-6-luna: tarifa publicada no OpenRouter em 16/10/2026 (mesmo
+  // preço da OpenAI). São os candidatos para baratear a Duda; sem a linha o custo
+  // caía em TARIFA_DESCONHECIDA (1/3), até 10x acima do real.
+  'gpt-5.6-luna':  { input: 0.2,  output: 1.2, cached: 0.02  },
+  'gpt-6-luna':    { input: 0.1,  output: 0.5, cached: 0.01  },
   'gpt-5.4':      { input: 2.5,  output: 15,  cached: 0.25  },
   'gpt-5.4-mini': { input: 0.75, output: 4.5, cached: 0.075 },
   'gpt-5.2':      { input: 1.75, output: 14,  cached: 0.175 },

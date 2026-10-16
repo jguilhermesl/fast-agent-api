@@ -20,6 +20,7 @@ const ChatRequestSchema = z.object({
   model_name:           z.string().default('gpt-4.1-mini'),
   system_prompt:        z.string().min(1),
   tenant_id:            z.string().optional(),
+  executor_model:       z.string().optional(),
 });
 
 // ── Auth middleware ────────────────────────────────────────────

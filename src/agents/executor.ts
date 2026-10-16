@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../config';
-import { getAgentIntents, getIntentLogs, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
+import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
 import {
   handleExecutarIntent,
@@ -17,13 +17,11 @@ import {
 import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
+import { escolherModeloExecutor } from './modelo-executor';
 
-/**
- * O Executor NÃO usa o `model_name` do agente: ele roda sempre neste modelo, que é
- * mais barato e só precisa escolher ferramenta e preencher argumento. Trocar o
- * modelo de um agente no painel muda o Orquestrador, não esta chamada.
- */
-const MODELO_EXECUTOR = 'gpt-5.4-mini';
+// O Executor NÃO usa o `model_name` do agente (esse é o do Orquestrador). O dele
+// vem de `prompt_config.executor_model`, com `gpt-5.4-mini` como padrão — ver
+// modelo-executor.ts para a ordem de escolha e a lista de modelos aceitos.
 
 // Mesmo teto de relógio do orquestrador (ver LLM_TIMEOUT_MS lá): antes o único
 // limite era de rodadas, e 8 rodadas sem timeout não têm teto de tempo nenhum.
@@ -43,10 +41,12 @@ export interface ExecutorResult {
 }
 
 export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult> {
-  const [intentsOuNull, intentLogs] = await Promise.all([
+  const [intentsOuNull, intentLogs, modeloDoAgente] = await Promise.all([
     getAgentIntents(input.agent_id),
     getIntentLogs(input.agent_id, input.conversation_id),
+    getModeloExecutorDoAgente(input.agent_id),
   ]);
+  const modelo = escolherModeloExecutor({ doCorpo: input.model, doAgente: modeloDoAgente });
 
   // `null` = erro de leitura no Supabase, distinto de "agente sem intents"
   // ([]). Aqui o fail-open é tratar como sem intents dinâmicas neste turno —
@@ -117,11 +117,11 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     }
     rounds = round + 1;
     const response = await openai.chat.completions.create({
-      model: MODELO_EXECUTOR,
+      model: modelo,
       messages,
       tools,
       tool_choice: 'auto',
-      ...amostragemDoModelo(MODELO_EXECUTOR, 0.3),
+      ...amostragemDoModelo(modelo, 0.3),
     }, { timeout: capTimeout(60_000, input.deadline) });
 
     const msg = response.choices[0].message;

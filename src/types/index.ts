@@ -19,6 +19,7 @@ export interface ChatRequest {
   model_name: string;
   system_prompt: string;              // montado pelo n8n com dados do usuário/empresa/CRM
   tenant_id?: string;
+  executor_model?: string;            // só a suíte manda: mede um modelo de Executor sem mexer no agente
 }
 
 // ── Execution Logs ────────────────────────────────────────────
@@ -97,6 +98,8 @@ export interface ExecutorInput {
   conversation_context?: string;    // últimas mensagens do histórico (para dar contexto ao Executor)
   /** Orçamento de tempo do turno inteiro (ver services/deadline.ts). Ausente = sem teto agregado. */
   deadline?: Deadline;
+  /** Modelo pedido no corpo do /api/chat (suíte). Validado em agents/modelo-executor.ts. */
+  model?: string;
 }
 
 // Intent configurada no Supabase (agent_intents)
