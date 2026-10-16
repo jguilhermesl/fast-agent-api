@@ -31,7 +31,10 @@ import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
-import { comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME } from './anthropic-executor-obrigatorio';
+import {
+  comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME,
+  LEMBRETE_RESPONDER, MAX_CHAMADAS_EXECUTOR_ANTHROPIC, EXECUTOR_NAO_CHAMADO,
+} from './anthropic-executor-obrigatorio';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
 import { ORCHESTRATOR_TOOLS, toOpenAITools, toAnthropicTools } from '../tools/definitions';
 import { createDeadline, capTimeout, DeadlineExceededError, TURN_BUDGET_MS, type Deadline } from '../services/deadline';
@@ -269,6 +272,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   const communications: Array<{ query: string; result: string }> = [];
 
   let lembreteFirmeUsado = false;
+  let chamadasExecutor = 0;
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (deadline.expired()) throw new DeadlineExceededError(`orquestrador Anthropic round ${round + 1}`);
     rounds = round + 1;
@@ -343,6 +347,14 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       if (block.type !== 'tool_use') continue;
       const args = block.input as { tasks: unknown[] };
       const query = JSON.stringify(args.tasks ?? []);
+      // Teto de chamadas ao Executor no turno (agents/anthropic-executor-obrigatorio.ts):
+      // a terceira não executa e volta pedindo a resposta com o que já tem.
+      if (chamadasExecutor >= MAX_CHAMADAS_EXECUTOR_ANTHROPIC) {
+        console.warn(`[Orchestrator] ${usedModel} pediu o executor pela ${chamadasExecutor + 1}ª vez no turno: não executado`);
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: EXECUTOR_NAO_CHAMADO });
+        continue;
+      }
+      chamadasExecutor++;
       const executorResult = await runExecutor({
         query,
         agent_id: req.agent_id,
@@ -359,7 +371,12 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       communications.push({ query, result: executorResult.result });
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: executorResult.result });
     }
-    messages.push({ role: 'user', content: toolResults });
+    // A instrução de responder vai junto da devolução (sem ela o Claude 5.5 seguia
+    // chamando o executor em toda rodada; ver LEMBRETE_RESPONDER).
+    messages.push({
+      role: 'user',
+      content: [...toolResults, { type: 'text', text: LEMBRETE_RESPONDER }] as Anthropic.MessageParam['content'],
+    });
   }
 
   throw new Error('Anthropic orchestrator hit max rounds');

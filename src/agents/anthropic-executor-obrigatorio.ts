@@ -19,6 +19,22 @@ export const LEMBRETE_EXECUTOR =
 export const LEMBRETE_EXECUTOR_FIRME =
   '[Instrução interna: a resposta anterior saiu sem chamar chamar_executor e foi descartada. Chame chamar_executor agora; a resposta ao cliente vem depois do retorno.]';
 
+/**
+ * Vai junto de toda devolução do Executor no caminho Anthropic. Medido em 16/10/2026
+ * (reprodução com o prompt da Duda): sem ela o claude-sonnet-5-5 chamava o executor
+ * em toda rodada — refazer a busca, buscar preparo, "fechar a consulta com o dado já
+ * obtido" — e estourava o teto de rodadas sem responder. Com ela, responde na rodada 1.
+ * `tool_choice: none` não serve: a resposta saía vazia (1 token).
+ */
+export const LEMBRETE_RESPONDER =
+  '[Instrução interna: o executor já devolveu o que este turno precisa. Escreva agora a resposta ao cliente, no formato de saída. Só chame chamar_executor de novo se o retorno trouxe BUSCA_VAZIA ou um item diferente do pedido.]';
+
+/** Teto de chamadas ao Executor por turno no caminho Anthropic (a 1ª + uma busca refeita). */
+export const MAX_CHAMADAS_EXECUTOR_ANTHROPIC = 2;
+
+export const EXECUTOR_NAO_CHAMADO =
+  'NÃO EXECUTADO: este turno já usou o executor duas vezes. Responda ao cliente com o que já tem; se faltar dado, diga que a equipe confirma.';
+
 /** Cópia das mensagens com um bloco de texto a mais no fim da última (a mensagem do cliente). */
 export function comLembrete(mensagens: Anthropic.MessageParam[], texto: string): Anthropic.MessageParam[] {
   if (!mensagens.length) return mensagens;
