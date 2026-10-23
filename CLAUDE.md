@@ -76,8 +76,9 @@ Estado das chaves no Railway (conferido em 30/09/2026):
 - **Montador em sombra** (`src/agents/montador/`, 23/10/2026): reproduz em código o nó `Prompt_Variavel` do n8n a partir do banco
   (`montar-prompt.ts` função pura; `texto-fixo.ts` = texto da expressão de 23/10 copiado byte a byte; `carregar-entrada.ts` = as mesmas
   consultas do n8n; `sombra.ts` = comparador), compara com o `system_prompt` que o n8n manda no `/api/chat` e registra a diferença.
-  **Não substitui o n8n**: o prompt que vale segue sendo o dele, a resposta não muda. Liga com `MONTADOR_SOMBRA=on` (env no Railway);
-  sem a variável nada roda, nem consulta extra. A leitura do banco começa no início do turno (o `crm_stage` é valor atual e o turno o muda) e a
+  **Não substitui o n8n**: o prompt que vale segue sendo o dele, a resposta não muda. Liga por agente com `prompt_config.montador_sombra = true`
+  (cache de 60 s), ou para todos com `MONTADOR_SOMBRA=on` no Railway; `MONTADOR_SOMBRA=off` desliga tudo. Agente sem a
+  chave custa uma leitura em cache por minuto, nada mais. A leitura do banco começa no início do turno (o `crm_stage` é valor atual e o turno o muda) e a
   montagem, a comparação e a gravação só depois de `res.json`, sem `await`, com try/catch total. Log `[MontadorSombra]` e uma linha por turno em
   `guard_shadow_logs` (a tabela não tem coluna de detalhes): `verdict` = `montador_igual`, `montador_igual_sem_horario` (só o minuto do
   horário) ou `montador_diferente`; `guard_mode = 'montador_sombra'`; comparação em JSON (posição e trechos de 120 caracteres, dados de

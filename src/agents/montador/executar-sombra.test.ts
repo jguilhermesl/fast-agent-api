@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { logGuardShadow } = vi.hoisted(() => ({ logGuardShadow: vi.fn() }));
-vi.mock('../../services/supabase', () => ({ supabase: { from: vi.fn() }, logGuardShadow }));
+vi.mock('../../services/supabase', () => ({ supabase: { from: vi.fn() }, logGuardShadow, getMontadorSombraNoAgente: vi.fn() }));
 
 import {
   iniciarSombraMontador,
@@ -43,6 +43,54 @@ afterEach(() => {
   if (ambiente === undefined) delete process.env.MONTADOR_SOMBRA;
   else process.env.MONTADOR_SOMBRA = ambiente;
   vi.restoreAllMocks();
+});
+
+describe('prompt_config.montador_sombra (chave por agente)', () => {
+  it('sem a variável, agente com a chave ligada mede', async () => {
+    delete process.env.MONTADOR_SOMBRA;
+    const carregar = vi.fn().mockResolvedValue(entrada());
+    const registrar = vi.fn().mockResolvedValue(undefined);
+    const ligadaNoAgente = vi.fn().mockResolvedValue(true);
+    const concluir = iniciarSombraMontador(TURNO(montarPrompt(entrada())), { carregar, registrar, ligadaNoAgente });
+    expect(concluir).toBeTypeOf('function');
+    concluir!();
+    await esvaziarFila();
+    await esvaziarFila();
+    expect(ligadaNoAgente).toHaveBeenCalledWith('agente-1');
+    expect(carregar).toHaveBeenCalledTimes(1);
+    expect(registrar).toHaveBeenCalledTimes(1);
+    expect(registrar.mock.calls[0][0].verdict).toBe('montador_igual');
+  });
+
+  it('sem a variável, agente sem a chave não lê o banco nem registra', async () => {
+    delete process.env.MONTADOR_SOMBRA;
+    const carregar = vi.fn();
+    const registrar = vi.fn();
+    const concluir = iniciarSombraMontador(TURNO('x'), { carregar, registrar, ligadaNoAgente: vi.fn().mockResolvedValue(false) });
+    concluir!();
+    await esvaziarFila();
+    await esvaziarFila();
+    expect(carregar).not.toHaveBeenCalled();
+    expect(registrar).not.toHaveBeenCalled();
+  });
+
+  it('falha ao ler a chave = desligada, sem lançar', async () => {
+    delete process.env.MONTADOR_SOMBRA;
+    const carregar = vi.fn();
+    const registrar = vi.fn();
+    const concluir = iniciarSombraMontador(TURNO('x'), { carregar, registrar, ligadaNoAgente: vi.fn().mockRejectedValue(new Error('fetch failed')) });
+    expect(() => concluir!()).not.toThrow();
+    await esvaziarFila();
+    await esvaziarFila();
+    expect(carregar).not.toHaveBeenCalled();
+  });
+
+  it('MONTADOR_SOMBRA=off desliga até agente com a chave', () => {
+    process.env.MONTADOR_SOMBRA = 'off';
+    const ligadaNoAgente = vi.fn().mockResolvedValue(true);
+    expect(iniciarSombraMontador(TURNO('x'), { carregar: vi.fn(), registrar: vi.fn(), ligadaNoAgente })).toBeNull();
+    expect(ligadaNoAgente).not.toHaveBeenCalled();
+  });
 });
 
 describe('MONTADOR_SOMBRA', () => {

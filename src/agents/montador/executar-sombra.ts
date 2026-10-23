@@ -17,7 +17,7 @@
 import { carregarEntrada, type ParamsCarga } from './carregar-entrada';
 import { montarPrompt, type EntradaMontador } from './montar-prompt';
 import { compararComN8n, vereditoDe, type ComparacaoMontador, type VereditoMontador } from './sombra';
-import { logGuardShadow } from '../../services/supabase';
+import { getMontadorSombraNoAgente, logGuardShadow } from '../../services/supabase';
 
 export interface TurnoParaSombra {
   agent_id: string;
@@ -39,6 +39,8 @@ export interface RegistroSombra {
 export interface DepsSombra {
   carregar: (p: ParamsCarga) => Promise<EntradaMontador>;
   registrar: (r: RegistroSombra) => Promise<void>;
+  /** `prompt_config.montador_sombra` do agente. Sem ela, só `MONTADOR_SOMBRA=on` liga. */
+  ligadaNoAgente?: (agentId: string) => Promise<boolean>;
 }
 
 /** Fica em `guard_shadow_logs.guard_mode` para separar estas linhas das do guard de grounding. */
@@ -65,7 +67,11 @@ export async function registrarEmGuardShadowLogs(r: RegistroSombra): Promise<voi
   });
 }
 
-const DEPS_PADRAO: DepsSombra = { carregar: (p) => carregarEntrada(p), registrar: registrarEmGuardShadowLogs };
+const DEPS_PADRAO: DepsSombra = {
+  carregar: (p) => carregarEntrada(p),
+  registrar: registrarEmGuardShadowLogs,
+  ligadaNoAgente: getMontadorSombraNoAgente,
+};
 
 function mensagemDe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -76,17 +82,30 @@ function mensagemDe(err: unknown): string {
  * Nunca lança.
  */
 export function iniciarSombraMontador(turno: TurnoParaSombra, deps: DepsSombra = DEPS_PADRAO): (() => void) | null {
-  if (!sombraDoMontadorLigada()) return null;
+  // `on` liga para todos; `off` desliga para todos; sem a variável vale a chave do agente
+  // (`prompt_config.montador_sombra`, 23/10/2026: o token do Railway no .env.local morreu e a chave
+  // por agente se liga pelo banco, como `estilo` e `cotacao_no_codigo`).
+  const global = sombraDoMontadorLigada();
+  const ligadaNoAgente = deps.ligadaNoAgente;
+  if (!global && (process.env.MONTADOR_SOMBRA === 'off' || !ligadaNoAgente)) return null;
   try {
     const recebido = turno.system_prompt;
-    const carga = deps
-      .carregar({
+    const recebidoEm = new Date();
+    const carregarAgora = () =>
+      deps.carregar({
         agentId: turno.agent_id,
         conversationId: turno.conversation_id,
         leadId: turno.lead_id,
         contatoTelefone: turno.contact_phone,
-        recebidoEm: new Date(),
-      })
+        recebidoEm,
+      });
+    // Global: a leitura sai já, no início do turno. Por agente: depois da chave (cache de 60 s).
+    const bruto: Promise<EntradaMontador | null> = global
+      ? carregarAgora()
+      : ligadaNoAgente!(turno.agent_id)
+          .catch(() => false)
+          .then((sim) => (sim ? carregarAgora() : null));
+    const carga = bruto
       .then(
         (entrada): EntradaMontador | null => entrada,
         (err: unknown) => {

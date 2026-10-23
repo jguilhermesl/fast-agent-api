@@ -683,6 +683,26 @@ export async function getConfigCotacao(agentId: string): Promise<{ ligado: boole
  * leitura também devolve `undefined` (a resposta sai como veio do modelo) e não vai para o
  * cache: o próximo turno tenta de novo.
  */
+// ── Montador em sombra por agente (agents/montador/executar-sombra.ts) ─────
+
+const montadorSombraCache = new Map<string, { em: number; ligada: boolean }>();
+
+/** `agents.prompt_config.montador_sombra === true`. Cache de 60 s; falha de leitura = desligada. */
+export async function getMontadorSombraNoAgente(agentId: string): Promise<boolean> {
+  const cache = montadorSombraCache.get(agentId);
+  if (cache && Date.now() - cache.em < 60_000) return cache.ligada;
+  try {
+    const { data, error } = await supabase.from('agents').select('prompt_config').eq('id', agentId).maybeSingle();
+    if (error) throw new Error(error.message);
+    const ligada = (data?.prompt_config as { montador_sombra?: unknown } | null)?.montador_sombra === true;
+    montadorSombraCache.set(agentId, { em: Date.now(), ligada });
+    return ligada;
+  } catch (err) {
+    console.error('[MontadorSombra] prompt_config não lido, sombra fica desligada neste turno:', err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
 const ESTILO_NO_CODIGO_TTL_MS = 60_000;
 const estiloNoCodigoCache = new Map<string, { em: number; estilo: EstiloConfig | undefined }>();
 
