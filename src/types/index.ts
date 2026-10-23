@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Deadline } from '../services/deadline';
+import type { EstiloConfig, MudancasEstilo } from '../agents/estilo-deterministico';
 
 export type ModelProvider = 'openai' | 'anthropic' | 'gemini';
 
@@ -14,6 +15,8 @@ export interface ChatRequest {
   cotacao?: { ligado: boolean; titulos: Record<string, string> };
   /** Corpo do /api/chat, só a suíte manda: liga a cotação no código sem mexer na configuração do agente. */
   cotacao_no_codigo?: boolean;
+  /** Corpo do /api/chat, só a suíte manda: vale no lugar de `prompt_config.estilo` (agents/estilo-deterministico.ts). */
+  estilo?: EstiloConfig;
   agent_id: string;
   conversation_id: string;
   lead_id: string;
@@ -69,6 +72,8 @@ export interface ExecutionLogs {
     /** A resposta deste turno não foi entregue (agents/rajada.ts). */
     descartado?: boolean;
     rajada?: { acao: 'enviar' | 'descartar'; motivo: string; novas: number; humano_no_turno: number; modo: string };
+    /** O que `prompt_config.estilo` mudou nas mensagens deste turno (agents/estilo-deterministico.ts). */
+    estilo?: MudancasEstilo;
   };
   communication?: Array<{
     query: string;

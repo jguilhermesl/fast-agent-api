@@ -24,9 +24,11 @@ import {
   getConfigCotacao,
   getBufferDelayMs,
   getMidiaNoFluxo,
+  getEstiloNoCodigo,
 } from '../services/supabase';
 import { runExecutor } from './executor';
 import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
+import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
@@ -725,7 +727,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   // Supabase quando o turno anterior acabou há até 45 s.
   // `response_style` do agente (painel → prompt_config): o n8n não manda no corpo,
   // então vem do banco, com cache curto. Falha de leitura = null = sufixo de antes.
-  const [history, cruzamento, estilo, ultimaAnterior, cfgCotacao] = await Promise.all([
+  const [history, cruzamento, estilo, ultimaAnterior, cfgCotacao, estiloNoCodigo] = await Promise.all([
     getHistory(scopedClientId, 18),
     config.cruzamentoMode === 'off'
       ? Promise.resolve<MotivoCruzamento | null>(null)
@@ -737,6 +739,8 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     // Conversa retomada depois de pausa longa (agents/retomada.ts). Falha = sem nota.
     getUltimaMensagemAnterior(req.conversation_id, new Date(Date.now() - JANELA_DO_TURNO_MS).toISOString()).catch(() => null),
     getConfigCotacao(req.agent_id),
+    // `prompt_config.estilo` (agents/estilo-deterministico.ts). Falha de leitura = undefined = sem ajuste.
+    getEstiloNoCodigo(req.agent_id),
   ]);
   // Cotação no código (agents/cotacao.ts): chave do agente, ou o corpo (só a suíte manda).
   req = { ...req, cotacao: { ligado: req.cotacao_no_codigo ?? cfgCotacao.ligado, titulos: cfgCotacao.titulos } };
@@ -1154,6 +1158,26 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     parsed = { ...parsed, mensagens: intercalarMidias(parsed.mensagens, midias) };
   }
 
+  // Estilo no código (agents/estilo-deterministico.ts, `prompt_config.estilo`): emoji, balões e
+  // negrito aplicados no texto final, depois de todos os guards e com a mídia já no lugar, antes
+  // de gravar no Redis, para o histórico ficar igual ao que o cliente recebe. Sem a chave, nada
+  // muda. Se a função lançar, vale o texto como estava.
+  const estiloDoTurno = req.estilo ?? estiloNoCodigo;
+  let estiloLog: MudancasEstilo | undefined;
+  if (estiloDoTurno) {
+    try {
+      const r = aplicarEstilo(parsed.mensagens, estiloDoTurno);
+      parsed = { ...parsed, mensagens: r.mensagens };
+      estiloLog = r.mudancas;
+      console.log(`[Estilo] conversation=${req.conversation_id} agent=${req.agent_id} config=${JSON.stringify(estiloDoTurno)} ${JSON.stringify(r.mudancas)}`);
+      if (r.mudancas.restaurouOriginais) {
+        console.warn(`[Estilo] conversation=${req.conversation_id} a resposta era só emoji: vão as mensagens originais`);
+      }
+    } catch (err) {
+      console.error(`[Estilo] conversation=${req.conversation_id} falhou, vão as mensagens como o modelo deu:`, err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // Atualiza histórico Redis — salva o texto limpo das mensagens, não o JSON bruto.
   // Isso evita que o modelo veja JSON estrutural no histórico em vez de linguagem natural.
   const assistantContent = paraHistorico(parsed.mensagens);
@@ -1174,7 +1198,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
       cost_usd: costUsd,
     },
     executor: result.executorTrace,
-    turno: { ...turnoBase, ...(rajadaLog ? { rajada: rajadaLog } : {}) },
+    turno: { ...turnoBase, ...(rajadaLog ? { rajada: rajadaLog } : {}), ...(estiloLog ? { estilo: estiloLog } : {}) },
     communication: result.communications.length > 0 ? result.communications : undefined,
   };
 

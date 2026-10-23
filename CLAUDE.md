@@ -58,6 +58,15 @@ Estado das chaves no Railway (conferido em 30/09/2026):
   A foto volta em `mensagens` como `[[midia:<url>]]` **antes da última mensagem**, o n8n manda em ordem e o
   `/api/send-external` converte o marcador em mídia (com 1,5 s de pausa depois). No Redis o marcador vira
   `[Imagem]`. Sem a chave, nada muda. Primeiro agente: Canda (Costa & Muniz).
+- **Estilo no código** (`src/agents/estilo-deterministico.ts`, 23/10/2026): `prompt_config.estilo:
+  { "emoji": false, "dividir": true }` é aplicado no texto final, depois dos guards e da mídia e antes do Redis
+  (o histórico fica igual ao que o cliente recebe). `emoji: false` tira emoji e arruma o espaço (mensagem só de
+  emoji some; se todas sumirem, vão as originais); `dividir: true` = parágrafo vira balão, teto de 4 por turno;
+  `dividir: false` = junta o texto seguido numa mensagem; com a chave presente (qualquer valor), `**negrito**`
+  vira `*negrito*`. `[[midia:...]]` e URLs não são tocados e a ordem mídia/texto é mantida. **Sem a chave, nada
+  muda.** O corpo do `/api/chat` aceita `estilo` (só a suíte manda). Log: `[Estilo]` e
+  `interaction_logs.payload.logs.turno.estilo` (`emojisRemovidos`, `baloesAntes/Depois`, `negritoConvertido`).
+  Cache da chave: 60 s. Não cobre a mensagem de `makeFallback` (erro interno).
 - Mudou algo aqui: testes (`npm test`), push, `/api/version`, e suíte da Duda antes e depois. A suíte é paga
   (~US$ 0,08 por conversa-repetição): pergunte ao dono com o valor.
 

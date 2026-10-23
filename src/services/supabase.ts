@@ -3,6 +3,7 @@ import { config } from '../config';
 import type { AgentIntent, IntentLog, TokenLogEntry } from '../types';
 import type { MensagemDoCliente } from '../agents/cruzamento';
 import type { EstadoDoLead, MensagemDaConversa } from '../agents/rajada';
+import { lerEstilo, type EstiloConfig } from '../agents/estilo-deterministico';
 
 // Cliente service_role para operações privilegiadas
 export const supabase = createClient(config.supabaseUrl, config.supabaseServiceKey);
@@ -650,6 +651,32 @@ export async function getConfigCotacao(agentId: string): Promise<{ ligado: boole
   } catch (err) {
     console.error('[Cotacao] prompt_config não lido, fica desligado:', err instanceof Error ? err.message : String(err));
     return { ligado: false, titulos: {} };
+  }
+}
+
+// ── Estilo no código (agents/estilo-deterministico.ts) ────────
+
+/**
+ * `agents.prompt_config.estilo` (`{ "emoji": false, "dividir": true }`). Sem a chave, ou com
+ * valor que não é objeto, devolve `undefined` e nada muda. Cache de 60 s por agente. Falha de
+ * leitura também devolve `undefined` (a resposta sai como veio do modelo) e não vai para o
+ * cache: o próximo turno tenta de novo.
+ */
+const ESTILO_NO_CODIGO_TTL_MS = 60_000;
+const estiloNoCodigoCache = new Map<string, { em: number; estilo: EstiloConfig | undefined }>();
+
+export async function getEstiloNoCodigo(agentId: string): Promise<EstiloConfig | undefined> {
+  const cache = estiloNoCodigoCache.get(agentId);
+  if (cache && Date.now() - cache.em < ESTILO_NO_CODIGO_TTL_MS) return cache.estilo;
+  try {
+    const { data, error } = await supabase.from('agents').select('prompt_config').eq('id', agentId).maybeSingle();
+    if (error) throw new Error(error.message);
+    const estilo = lerEstilo((data?.prompt_config as { estilo?: unknown } | null)?.estilo);
+    estiloNoCodigoCache.set(agentId, { em: Date.now(), estilo });
+    return estilo;
+  } catch (err) {
+    console.error('[Estilo] prompt_config não lido, a resposta sai sem ajuste:', err instanceof Error ? err.message : String(err));
+    return undefined;
   }
 }
 
