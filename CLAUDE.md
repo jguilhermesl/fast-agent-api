@@ -21,7 +21,7 @@ npm run test:smoke   # tsx scripts/smoke-http.ts
 
 Env obrigatória (só nomes, `src/config/index.ts`): `API_SECRET`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `WEBHOOK_SECRET`. Opcional: `REDIS_URL`,
-`ZAPI_CLIENT_TOKEN`, `GUARD_MODE`, `CRUZAMENTO_MODE`, `RAJADA_MODE`. Qual Supabase está no env do Railway: não verificado.
+`ZAPI_CLIENT_TOKEN`, `GUARD_MODE`, `CRUZAMENTO_MODE`, `RAJADA_MODE`, `MONTADOR_SOMBRA`. Qual Supabase está no env do Railway: não verificado.
 
 Estado das chaves no Railway (conferido em 30/09/2026):
 - `API_SECRET` é o placeholder `your-secret-key-here` e autentica `/api/chat` e `/api/send-external`. A troca
@@ -73,6 +73,18 @@ Estado das chaves no Railway (conferido em 30/09/2026):
   `[LoopRobo]` e `guard_shadow_logs.verdict = loop_robo_pausado`. Volta sozinho quando a repetição sai da janela.
   Áudio/foto/figurinha (texto vazio) e texto de 1 caractere não contam. Simulado em 30 dias: só os 2 loops da Carol.
   `LOOP_ROBO_MODE=log|off` no Railway desliga sem deploy.
+- **Montador em sombra** (`src/agents/montador/`, 23/10/2026): reproduz em código o nó `Prompt_Variavel` do n8n a partir do banco
+  (`montar-prompt.ts` função pura; `texto-fixo.ts` = texto da expressão de 23/10 copiado byte a byte; `carregar-entrada.ts` = as mesmas
+  consultas do n8n; `sombra.ts` = comparador), compara com o `system_prompt` que o n8n manda no `/api/chat` e registra a diferença.
+  **Não substitui o n8n**: o prompt que vale segue sendo o dele, a resposta não muda. Liga com `MONTADOR_SOMBRA=on` (env no Railway);
+  sem a variável nada roda, nem consulta extra. A leitura do banco começa no início do turno (o `crm_stage` é valor atual e o turno o muda) e a
+  montagem, a comparação e a gravação só depois de `res.json`, sem `await`, com try/catch total. Log `[MontadorSombra]` e uma linha por turno em
+  `guard_shadow_logs` (a tabela não tem coluna de detalhes): `verdict` = `montador_igual`, `montador_igual_sem_horario` (só o minuto do
+  horário) ou `montador_diferente`; `guard_mode = 'montador_sombra'`; comparação em JSON (posição e trechos de 120 caracteres, dados de
+  cliente mascarados) em `tokens[1]`, lida com `(tokens[1])::jsonb ->> 'primeiraDiferenca'`. Diferente do guard, grava turno limpo também
+  (retenção de 14 dias). Se o texto do n8n mudar, a sombra acusa `montador_diferente` até regenerar `texto-fixo.ts`.
+  Medido em 23/10/2026: 226/226 iguais byte a byte (Duda, Leandro, Carol; Dani 1/1) com os dados que o n8n leu; 28/28 relendo do banco com
+  as consultas equivalentes (sem o `crm_stage`, que muda depois do turno). Ainda não rodou em produção.
 - Mudou algo aqui: testes (`npm test`), push, `/api/version`, e suíte da Duda antes e depois. A suíte é paga
   (~US$ 0,08 por conversa-repetição): pergunte ao dono com o valor.
 

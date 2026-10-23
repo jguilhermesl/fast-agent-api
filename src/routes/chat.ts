@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { config } from '../config';
 import { runOrchestrator } from '../agents/orchestrator';
 import { limparEventosDoProvedor } from '../agents/entrada';
+import { iniciarSombraMontador } from '../agents/montador/executar-sombra';
 
 export const chatRouter = Router();
 
@@ -65,6 +66,10 @@ chatRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
   }
   data.client_messages = falaDoCliente;
 
+  // Montador em sombra (MONTADOR_SOMBRA=on, ver agents/montador/): só compara e registra o prompt montado
+  // no código com o `system_prompt` do n8n. Sem a variável devolve null e nada roda. Nunca lança.
+  const concluirSombra = iniciarSombraMontador(data);
+
   try {
     const response = await runOrchestrator(data);
     const elapsed = Date.now() - start;
@@ -72,6 +77,7 @@ chatRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
     console.log(`[Chat] ← mensagens=${response.mensagens.length} redirect=${response.redirect_human} elapsed=${elapsed}ms`);
 
     res.json(response);
+    concluirSombra?.(); // depois da resposta: sem await, não altera o que o cliente HTTP recebeu
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[Chat] Unhandled error:', msg);
