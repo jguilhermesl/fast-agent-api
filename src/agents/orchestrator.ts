@@ -25,8 +25,10 @@ import {
   getBufferDelayMs,
   getMidiaNoFluxo,
   getEstiloNoCodigo,
+  getMensagensRecebidasDesde,
 } from '../services/supabase';
 import { runExecutor } from './executor';
+import { decidirLoopRobo, JANELA_LOOP_MS, type DecisaoLoop } from './loop-robo';
 import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
 import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
@@ -705,6 +707,35 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         await appendHistory(scopedClientId, [
           { role: 'user', content: historyPrefix(req.client_message_type) + req.client_messages },
         ]);
+        return { ...makeFallback([]), mensagens: [], redirect_human: false, transfer_reason: undefined };
+      }
+    }
+  }
+
+  // Robô do outro lado (agents/loop-robo.ts): a mesma resposta automática chegando sem
+  // parar. Pausa antes de qualquer LLM e não grava no histórico; volta sozinho quando a
+  // repetição sai da janela de 1 h. Falha de leitura = turno segue normal.
+  if (config.loopRoboMode !== 'off' && ehConversaReal(req.conversation_id)) {
+    let decisao: DecisaoLoop | null = null;
+    try {
+      const recebidas = await getMensagensRecebidasDesde(req.conversation_id, new Date(Date.now() - JANELA_LOOP_MS).toISOString());
+      decisao = decidirLoopRobo(recebidas);
+    } catch (err) {
+      console.error('[LoopRobo] leitura das mensagens falhou, turno segue:', err instanceof Error ? err.message : String(err));
+    }
+    if (decisao?.loop) {
+      console.warn(`[LoopRobo] conversation=${req.conversation_id} agent=${req.agent_id} regra=${decisao.regra} textos=${decisao.textos} distintos=${decisao.distintos} modo=${config.loopRoboMode}`);
+      void logGuardShadow({
+        agent_id: req.agent_id,
+        conversation_id: req.conversation_id,
+        lead_id: req.lead_id,
+        verdict: config.loopRoboMode === 'pausar' ? 'loop_robo_pausado' : 'loop_robo_detectado',
+        tokens: [decisao.regra ?? '', `textos=${decisao.textos}`, `distintos=${decisao.distintos}`],
+        mensagens: [],
+        tools_called: [],
+        guard_mode: config.loopRoboMode,
+      });
+      if (config.loopRoboMode === 'pausar') {
         return { ...makeFallback([]), mensagens: [], redirect_human: false, transfer_reason: undefined };
       }
     }

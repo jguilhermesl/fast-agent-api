@@ -67,6 +67,12 @@ Estado das chaves no Railway (conferido em 30/09/2026):
   muda.** O corpo do `/api/chat` aceita `estilo` (só a suíte manda). Log: `[Estilo]` e
   `interaction_logs.payload.logs.turno.estilo` (`emojisRemovidos`, `baloesAntes/Depois`, `negritoConvertido`).
   Cache da chave: 60 s. Não cobre a mensagem de `makeFallback` (erro interno).
+- **Robô do outro lado** (`src/agents/loop-robo.ts`, 23/10/2026): no começo do turno, antes de qualquer LLM, lê as
+  mensagens de texto do cliente da última hora; 10+ com até 2 textos diferentes, ou 20+ com 1 diferente para cada 8,
+  é resposta automática em loop (Carol 08/10: 764 turnos, US$ 10,98). Pausa: `mensagens: []`, nada no Redis, log
+  `[LoopRobo]` e `guard_shadow_logs.verdict = loop_robo_pausado`. Volta sozinho quando a repetição sai da janela.
+  Áudio/foto/figurinha (texto vazio) e texto de 1 caractere não contam. Simulado em 30 dias: só os 2 loops da Carol.
+  `LOOP_ROBO_MODE=log|off` no Railway desliga sem deploy.
 - Mudou algo aqui: testes (`npm test`), push, `/api/version`, e suíte da Duda antes e depois. A suíte é paga
   (~US$ 0,08 por conversa-repetição): pergunte ao dono com o valor.
 
