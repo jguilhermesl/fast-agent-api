@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { sentinelaEnvio500 } from './sentinela-500';
+import { metaSend } from './meta';
 
 // ── Adapter Interface ──────────────────────────────────────────
 
@@ -487,6 +488,9 @@ export function getAdapter(provider: string): AdapterFn {
   }
   if (provider === 'gptmaker') {
     return (creds, params) => gptmakerSend(creds, params);
+  }
+  if (provider === 'meta') {
+    return (creds, params) => metaSend(creds, params);
   }
   throw new Error(`Unknown provider: ${provider}`);
 }
