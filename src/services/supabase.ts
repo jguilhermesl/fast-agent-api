@@ -221,6 +221,19 @@ export async function getUltimaMensagemAnterior(conversationId: string, antesDeI
   return (data?.[0]?.created_at as string | undefined) ?? null;
 }
 
+/** `true` = a conversa ainda não tem nenhuma mensagem de saída (fora as de sistema). */
+export async function conversaSemSaida(conversationId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'outbound')
+    .neq('message_type', 'system')
+    .limit(1);
+  if (error) throw new Error(`conversaSemSaida: ${error.message}`);
+  return (data?.length ?? 0) === 0;
+}
+
 export async function getUltimasMensagensDaConversa(
   conversationId: string,
   desdeIso: string,

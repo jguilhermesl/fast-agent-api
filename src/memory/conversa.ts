@@ -7,8 +7,9 @@
 //
 // Com a chave ligada, cada turno compara o `conversation_id` com o último que usou a
 // memória. Mudou: o histórico vai para `memoria:anterior:*` (30 dias, para consulta) e a
-// conversa nova começa vazia. Sem marcador (memória de antes da chave): não corta, só
-// marca, para não apagar a conversa em andamento no dia em que a chave liga.
+// conversa nova começa vazia. Sem marcador (memória de antes da chave): corta só se a
+// conversa ainda não tem nenhuma mensagem de saída (é o primeiro turno dela); conversa em
+// andamento no dia em que a chave liga só ganha o marcador e segue com a memória.
 
 export interface MemoriaStore {
   get(key: string): Promise<string | null>;
@@ -17,6 +18,9 @@ export interface MemoriaStore {
 }
 
 export type CorteMemoria = 'mesma' | 'marcou' | 'cortou';
+
+/** Só é chamada sem marcador: `true` = a conversa ainda não tem mensagem de saída. */
+export type PrimeiroTurno = () => Promise<boolean>;
 
 const TTL_SECONDS = 2_592_000;
 
@@ -27,11 +31,13 @@ export async function cortarSeConversaNova(
   store: MemoriaStore,
   scopedClientId: string,
   conversationId: string,
+  primeiroTurno: PrimeiroTurno,
 ): Promise<CorteMemoria> {
   const marcador = await store.get(chaveMarcador(scopedClientId));
   if (marcador === conversationId) return 'mesma';
 
-  if (marcador !== null) {
+  const cortar = marcador !== null || (await primeiroTurno());
+  if (cortar) {
     const historico = await store.get(scopedClientId);
     if (historico !== null) {
       await store.set(chaveAnterior(scopedClientId), historico, TTL_SECONDS);
@@ -39,5 +45,5 @@ export async function cortarSeConversaNova(
     }
   }
   await store.set(chaveMarcador(scopedClientId), conversationId, TTL_SECONDS);
-  return marcador === null ? 'marcou' : 'cortou';
+  return cortar ? 'cortou' : 'marcou';
 }

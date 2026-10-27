@@ -27,6 +27,7 @@ import {
   getEstiloNoCodigo,
   getMensagensRecebidasDesde,
   getMemoriaPorConversa,
+  conversaSemSaida,
 } from '../services/supabase';
 import { cortarSeConversaNova } from '../memory/conversa';
 import { runExecutor } from './executor';
@@ -673,7 +674,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   if (ehConversaReal(req.conversation_id)) {
     try {
       if (await getMemoriaPorConversa(req.agent_id)) {
-        const corte = await cortarSeConversaNova(memoriaStore, scopedClientId, req.conversation_id);
+        const corte = await cortarSeConversaNova(memoriaStore, scopedClientId, req.conversation_id, () => conversaSemSaida(req.conversation_id));
         if (corte === 'cortou') console.log(`[Memória] conversation=${req.conversation_id} conversa nova: histórico anterior guardado à parte`);
       }
     } catch (err) {
