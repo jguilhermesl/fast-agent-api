@@ -92,6 +92,8 @@ Estado das chaves no Railway (conferido em 30/09/2026):
 ## Gotchas
 
 - **Redis aqui é memória do agente** (histórico por `agent_id:contact_phone`, TTL 30 dias). No N8N, Redis é debounce.
+  A memória atravessa leads do mesmo telefone; com `prompt_config.memoria_por_conversa: true` (só a Canda, 27/10) a
+  conversa nova começa vazia (`src/memory/conversa.ts`).
 - `GUARD_MODE` padrão `shadow`. Nunca ligar `enforce` sem os 7 dias de shadow calibrados (SPEC-02 §7).
 - O `CONTEXT.md` descreve entrada e saída pelo Chatwoot; no código o Chatwoot só aparece como "era Chatwoot,
   apagado do repo" (`src/tools/handlers.ts:128`). Os trechos de Chatwoot do `CONTEXT.md` estão velhos.
