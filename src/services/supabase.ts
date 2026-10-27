@@ -618,6 +618,27 @@ export async function getMidiaNoFluxo(agentId: string): Promise<boolean> {
   return ligado;
 }
 
+/**
+ * `agents.prompt_config.memoria_por_conversa === true`: conversa nova do mesmo
+ * telefone começa com o histórico vazio (memory/conversa.ts). Falha de leitura vale
+ * `false`, o comportamento antigo (memória por telefone).
+ */
+const memoriaPorConversaCache = new Map<string, { em: number; ligado: boolean }>();
+
+export async function getMemoriaPorConversa(agentId: string): Promise<boolean> {
+  const cache = memoriaPorConversaCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.ligado;
+  let ligado = false;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    ligado = (ag?.prompt_config as { memoria_por_conversa?: unknown } | null)?.memoria_por_conversa === true;
+  } catch (err) {
+    console.error('[Memória] prompt_config não lido, memória por telefone:', err instanceof Error ? err.message : String(err));
+  }
+  memoriaPorConversaCache.set(agentId, { em: Date.now(), ligado });
+  return ligado;
+}
+
 // ── Modelo do Executor por agente ─────────────────────────────
 
 /**

@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
-import { getHistory, appendHistory, lockStore, getUltimoTurno, setUltimoTurno, getPendente, setPendente, delPendente } from '../memory/redis';
+import { getHistory, appendHistory, lockStore, memoriaStore, getUltimoTurno, setUltimoTurno, getPendente, setPendente, delPendente } from '../memory/redis';
 import { entrarNaFila, sairDaFila, TURN_LOCK_WAIT_MS, type Vez } from '../memory/fila';
 import { detectarCruzamento, comNotaDeCruzamento, type MotivoCruzamento } from './cruzamento';
 import { cumprimentoDeveCalar } from './saudacao-espera';
@@ -26,7 +26,9 @@ import {
   getMidiaNoFluxo,
   getEstiloNoCodigo,
   getMensagensRecebidasDesde,
+  getMemoriaPorConversa,
 } from '../services/supabase';
+import { cortarSeConversaNova } from '../memory/conversa';
 import { runExecutor } from './executor';
 import { decidirLoopRobo, JANELA_LOOP_MS, type DecisaoLoop } from './loop-robo';
 import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
@@ -666,6 +668,19 @@ async function avaliarRajada(
 }
 
 async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Deadline, vez: Vez, inicio: number): Promise<ChatResponse> {
+  // Conversa nova do mesmo telefone começa sem o histórico da anterior (memory/conversa.ts).
+  // Antes de qualquer leitura ou gravação do histórico neste turno. Falha = memória de antes.
+  if (ehConversaReal(req.conversation_id)) {
+    try {
+      if (await getMemoriaPorConversa(req.agent_id)) {
+        const corte = await cortarSeConversaNova(memoriaStore, scopedClientId, req.conversation_id);
+        if (corte === 'cortou') console.log(`[Memória] conversation=${req.conversation_id} conversa nova: histórico anterior guardado à parte`);
+      }
+    } catch (err) {
+      console.error('[Memória] corte por conversa falhou, turno segue:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // Turno anterior desta rajada foi descartado (agents/rajada.ts): o texto dele
   // entra aqui, antes de tudo, como se o n8n tivesse juntado as duas mensagens.
   // Vale em qualquer RAJADA_MODE: o pendente existe, o cliente escreveu aquilo.

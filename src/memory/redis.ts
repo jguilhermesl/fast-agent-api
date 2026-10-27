@@ -2,6 +2,7 @@ import Redis from 'ioredis';
 import { config } from '../config';
 import type { ChatMessage } from '../types';
 import type { LockStore } from './fila';
+import type { MemoriaStore } from './conversa';
 import type { RegistroTurno } from '../agents/cruzamento';
 import type { Pendente } from '../agents/rajada';
 
@@ -53,6 +54,17 @@ export async function appendHistory(
     console.error('[Redis] appendHistory error:', err);
   }
 }
+
+// Memória por conversa (memory/conversa.ts).
+export const memoriaStore: MemoriaStore = {
+  get: (key) => redis.get(key),
+  set: async (key, value, ttlSeconds) => {
+    await redis.set(key, value, 'EX', ttlSeconds);
+  },
+  del: async (key) => {
+    await redis.del(key);
+  },
+};
 
 // ── Fila de turnos (memory/fila.ts) ───────────────────────────
 // Chaves `fila:turno:*`, `turno:ultimo:*` e `turno:pendente:*` não colidem com o histórico, cuja
