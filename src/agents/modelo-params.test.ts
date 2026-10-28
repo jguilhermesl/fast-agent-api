@@ -28,6 +28,7 @@ describe('amostragemDoModelo', () => {
   it('trata gpt-6-luna como a familia 5.6, e só ele da familia 6', () => {
     expect(amostragemDoModelo('gpt-6-luna', 0.2)).toEqual({ reasoning_effort: 'none' });
     expect(amostragemDoModelo('gpt-6-luna-2026-09-22', 0.2)).toEqual({ reasoning_effort: 'none' });
+    expect(amostragemDoModelo('gpt-6.1-terra', 0.2)).toEqual({ reasoning_effort: 'none' });
     for (const m of ['gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-astra']) {
       expect(amostragemDoModelo(m, 0.2)).toEqual({ temperature: 0.2 });
     }

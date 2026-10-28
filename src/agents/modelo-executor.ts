@@ -27,6 +27,7 @@ export const MODELOS_EXECUTOR_ACEITOS: readonly string[] = [
   'gpt-4.1-mini',
   'gpt-5.6-luna',
   'gpt-6-luna',
+  'gpt-6.1-terra',
   // Anthropic (16/10/2026): o Executor roda pelo caminho claude-* de executor.ts,
   // com cache de prompt; se falhar antes de executar ferramenta, cai no padrão.
   'claude-haiku-5-5',

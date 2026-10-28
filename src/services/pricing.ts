@@ -58,6 +58,8 @@ export const TARIFAS_POR_1M: Record<string, Tarifa> = {
   // caía em TARIFA_DESCONHECIDA (1/3), até 10x acima do real.
   'gpt-5.6-luna':  { input: 0.2,  output: 1.2, cached: 0.02  },
   'gpt-6-luna':    { input: 0.1,  output: 0.5, cached: 0.01  },
+  // gpt-6.1-terra (lançado em 26/10/2026): tarifa da OpenAI, igual no OpenRouter em 28/10/2026.
+  'gpt-6.1-terra': { input: 1,    output: 5,   cached: 0.05  },
   'gpt-5.4':      { input: 2.5,  output: 15,  cached: 0.25  },
   'gpt-5.4-mini': { input: 0.75, output: 4.5, cached: 0.075 },
   'gpt-5.2':      { input: 1.75, output: 14,  cached: 0.175 },
