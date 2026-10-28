@@ -116,6 +116,7 @@ export interface ExecutorInput {
 // Intent configurada no Supabase (agent_intents)
 export interface AgentIntent {
   id: string;
+  name?: string;
   slug: string;
   trigger_description: string;
   request_schema?: string | { 

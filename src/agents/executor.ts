@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
-import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
+import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, getExecutorConfereTarefas, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
 import {
   handleExecutarIntent,
@@ -21,6 +21,7 @@ import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
 import { escolherModeloExecutor, MODELO_EXECUTOR_PADRAO } from './modelo-executor';
 import { textoFixoVizinho } from './texto-fixo-vizinho';
+import { intencoesEsquecidas, cobrancaDeTarefas } from './tarefas-esquecidas';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
 
 // O Executor NÃO usa o `model_name` do agente (esse é o do Orquestrador). O dele
@@ -46,10 +47,11 @@ export interface ExecutorResult {
 }
 
 export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult> {
-  const [intentsOuNull, intentLogs, modeloDoAgente] = await Promise.all([
+  const [intentsOuNull, intentLogs, modeloDoAgente, confereTarefas] = await Promise.all([
     getAgentIntents(input.agent_id),
     getIntentLogs(input.agent_id, input.conversation_id),
     getModeloExecutorDoAgente(input.agent_id),
+    getExecutorConfereTarefas(input.agent_id),
   ]);
   const modelo = escolherModeloExecutor({ doCorpo: input.model, doAgente: modeloDoAgente });
 
@@ -111,6 +113,17 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
   let esgotouPorPrazo = false;
 
+  // Uma cobrança por turno: tarefa pedida pelo nome da intenção e não chamada (agents/tarefas-esquecidas.ts).
+  let cobrou = false;
+  const faltandoParaCobrar = (): string | null => {
+    if (!confereTarefas || cobrou) return null;
+    const faltam = intencoesEsquecidas(input.query, intents, toolsCalledLog.map((t) => t.tool));
+    if (!faltam.length) return null;
+    cobrou = true;
+    console.warn(`[Executor] tarefa sem chamada, cobrando: ${faltam.map((i) => i.slug).join(', ')} (agent_id=${input.agent_id} conversation=${input.conversation_id})`);
+    return cobrancaDeTarefas(faltam);
+  };
+
   // Executa UMA ferramenta pedida pelo modelo, seja qual for o provedor, e registra no log.
   const executarFerramenta = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
     let result: string;
@@ -166,6 +179,12 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         usedModel = modelo;
 
         if (response.stop_reason !== 'tool_use') {
+          const cobranca = faltandoParaCobrar();
+          if (cobranca) {
+            msgsAnthropic.push({ role: 'assistant', content: response.content });
+            msgsAnthropic.push({ role: 'user', content: cobranca });
+            continue;
+          }
           await saveTokenUsage(buildTokenLogEntry({
             agent_id: input.agent_id, conversation_id: input.conversation_id, lead_id: input.lead_id,
             model: usedModel, tokensIn: totalInputTokens, tokensOut: totalOutputTokens, tokensCached: totalCachedTokens,
@@ -228,6 +247,12 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
     // Sem tool calls → resposta final
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      const cobranca = faltandoParaCobrar();
+      if (cobranca) {
+        messages.push({ role: 'assistant', content: msg.content ?? '' });
+        messages.push({ role: 'user', content: cobranca });
+        continue;
+      }
       // buildTokenLogEntry (services/pricing.ts) grava pricing_version: 2 — SPEC-01.
       await saveTokenUsage(buildTokenLogEntry({
         agent_id: input.agent_id,

@@ -27,7 +27,7 @@ export const supabase = createClient(config.supabaseUrl, config.supabaseServiceK
 export async function getAgentIntents(agentId: string): Promise<AgentIntent[] | null> {
   const { data, error } = await supabase
     .from('agent_intents')
-    .select('id, slug, trigger_description, request_schema')
+    .select('id, name, slug, trigger_description, request_schema')
     .eq('agent_id', agentId)
     // Intenção desligada no painel não pode virar ferramenta do Executor: antes ela
     // chegava como tool e o gatilho precisava pedir "NAO USE" (Duda: mamografia com
@@ -649,6 +649,26 @@ export async function getMemoriaPorConversa(agentId: string): Promise<boolean> {
     console.error('[Memória] prompt_config não lido, memória por telefone:', err instanceof Error ? err.message : String(err));
   }
   memoriaPorConversaCache.set(agentId, { em: Date.now(), ligado });
+  return ligado;
+}
+
+/**
+ * `agents.prompt_config.executor_confere_tarefas === true`: o Executor cobra uma vez a
+ * intenção pedida pelo nome e não chamada (agents/tarefas-esquecidas.ts). Falha = `false`.
+ */
+const executorConfereCache = new Map<string, { em: number; ligado: boolean }>();
+
+export async function getExecutorConfereTarefas(agentId: string): Promise<boolean> {
+  const cache = executorConfereCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.ligado;
+  let ligado = false;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    ligado = (ag?.prompt_config as { executor_confere_tarefas?: unknown } | null)?.executor_confere_tarefas === true;
+  } catch (err) {
+    console.error('[Executor] prompt_config não lido, sem conferência de tarefas:', err instanceof Error ? err.message : String(err));
+  }
+  executorConfereCache.set(agentId, { em: Date.now(), ligado });
   return ligado;
 }
 
