@@ -36,7 +36,7 @@ import { decidirLoopRobo, JANELA_LOOP_MS, type DecisaoLoop } from './loop-robo';
 import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
 import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
-import { detectarPerguntaRepetida, type PerguntaRepetida } from './pergunta-repetida';
+import { detectarPerguntaRepetida, tirarPerguntasRepetidas, type PerguntaRepetida } from './pergunta-repetida';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
@@ -984,6 +984,8 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         if (revisto && revisto.mensagens.length) {
           parsed = revisto;
           desfecho = detectarPerguntaRepetida(revisto.mensagens.join('\n'), history, req.client_messages) ? 'insistiu' : 'reescrita';
+          // Insistiu: tira a frase-pergunta repetida (teste de 29/10: 2 de 8 reescritas repetiram de novo).
+          if (desfecho === 'insistiu') parsed = { ...parsed, mensagens: tirarPerguntasRepetidas(parsed.mensagens, history) };
         } else desfecho = 'reescrita_falhou';
       }
       perguntaRepetidaLog = { pergunta: repetida.pergunta, anterior: repetida.anterior, desfecho };

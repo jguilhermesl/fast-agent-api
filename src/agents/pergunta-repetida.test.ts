@@ -4,6 +4,7 @@ import {
   detectarPerguntaRepetida,
   extrairPerguntas,
   mesmaPergunta,
+  tirarPerguntasRepetidas,
   type FalaDoHistorico,
 } from './pergunta-repetida';
 
@@ -145,10 +146,32 @@ describe('detectarPerguntaRepetida', () => {
 
 describe('correcaoDePergunta', () => {
   it('cita a pergunta e pede para avançar', () => {
-    expect(correcaoDePergunta('Em qual região você pensa?')).toBe(
-      '[Instrução interna, não é do cliente: você já perguntou "Em qual região você pensa?" e o cliente respondeu outra coisa. ' +
-        'Não repita essa pergunta, nem com outras palavras. Aproveite o que ele disse, avance com outra pergunta ' +
-        'diferente ou mostre opções. Reescreva a resposta no mesmo formato de saída.]',
-    );
+    const c = correcaoDePergunta('Em qual região você pensa?');
+    expect(c).toContain('você já perguntou "Em qual região você pensa?"');
+    expect(c).toContain('Não repita essa pergunta, nem com outras palavras');
+    expect(c).toContain('responda sem pergunta');
+  });
+});
+
+describe('tirarPerguntasRepetidas (29/10: reescrita que insistiu)', () => {
+  const hist: FalaDoHistorico[] = [
+    { role: 'user', content: 'quero comprar' },
+    { role: 'assistant', content: 'Que bom. Em qual região você pensa?' },
+  ];
+  it('tira só a frase-pergunta repetida e mantém o resto', () => {
+    expect(tirarPerguntasRepetidas(['Entendi, pra morar. Em qual região você pensa?'], hist)).toEqual(['Entendi, pra morar.']);
+  });
+  it('mensagem que fica vazia sai; se todas ficariam vazias, devolve as originais', () => {
+    expect(tirarPerguntasRepetidas(['Em qual região você pensa?', 'Separei umas fotos.'], hist)).toEqual(['Separei umas fotos.']);
+    expect(tirarPerguntasRepetidas(['Em qual região você pensa?'], hist)).toEqual(['Em qual região você pensa?']);
+  });
+  it('correção lista as outras perguntas já feitas', () => {
+    const r = detectarPerguntaRepetida('Em qual região você pensa?', [
+      { role: 'assistant', content: 'Pensa em fechar pra quando?' },
+      { role: 'user', content: 'morar' },
+      { role: 'assistant', content: 'Em qual região você pensa?' },
+      { role: 'user', content: 'campina grande' },
+    ]);
+    expect(r?.correcao).toContain('Pensa em fechar pra quando?');
   });
 });

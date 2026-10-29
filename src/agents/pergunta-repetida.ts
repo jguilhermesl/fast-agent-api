@@ -83,12 +83,35 @@ export function mesmaPergunta(a: string, b: string): boolean {
 
 const links = (s: string) => new Set(s.match(/https?:\/\/\S+|\/imovel\/[\w-]+/gi) ?? []);
 
-export function correcaoDePergunta(pergunta: string): string {
+export function correcaoDePergunta(pergunta: string, jaFeitas: string[] = []): string {
+  // Teste de 29/10: com só a pergunta repetida, o modelo trocava por outra que também já tinha feito.
+  const outras = jaFeitas.filter((p) => p !== pergunta);
   return (
     `[Instrução interna, não é do cliente: você já perguntou "${pergunta}" e o cliente respondeu outra coisa. ` +
-    'Não repita essa pergunta, nem com outras palavras. Aproveite o que ele disse, avance com outra pergunta ' +
-    'diferente ou mostre opções. Reescreva a resposta no mesmo formato de saída.]'
+    'Não repita essa pergunta, nem com outras palavras' +
+    (outras.length ? `, nem estas que você também já fez: ${outras.map((p) => `"${p}"`).join('; ')}` : '') +
+    '. Aproveite o que ele disse, avance com uma pergunta nova ou mostre opções; se não houver pergunta nova a ' +
+    'fazer, responda sem pergunta. Reescreva a resposta no mesmo formato de saída.]'
   );
+}
+
+/**
+ * Último recurso quando a reescrita insiste: tira das mensagens as frases-pergunta que repetem uma já feita.
+ * Mensagem que fica vazia sai da lista; se todas ficariam vazias, devolve as originais (melhor repetir que calar).
+ */
+export function tirarPerguntasRepetidas(mensagens: string[], historico: FalaDoHistorico[]): string[] {
+  const feitas = historico
+    .filter((m) => m.role === 'assistant')
+    .slice(-FALAS_OLHADAS)
+    .flatMap((f) => extrairPerguntas(f.content));
+  const limpas = mensagens
+    .map((m) => {
+      let t = m;
+      for (const p of extrairPerguntas(m)) if (feitas.some((f) => mesmaPergunta(p, f))) t = t.replace(p, '');
+      return t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    })
+    .filter((m) => m.length > 0);
+  return limpas.length ? limpas : mensagens;
 }
 
 /**
@@ -113,7 +136,10 @@ export function detectarPerguntaRepetida(
     if (fichaNova) continue;
     for (const anterior of extrairPerguntas(fala.content)) {
       const pergunta = novas.find((n) => mesmaPergunta(n, anterior));
-      if (pergunta) return { pergunta, anterior, correcao: correcaoDePergunta(anterior) };
+      if (pergunta) {
+        const jaFeitas = falas.flatMap((f) => extrairPerguntas(f.content));
+        return { pergunta, anterior, correcao: correcaoDePergunta(anterior, jaFeitas) };
+      }
     }
   }
   return null;
