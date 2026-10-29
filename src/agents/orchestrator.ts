@@ -251,7 +251,7 @@ async function reescreverComInstrucao(
   deadline: Deadline,
   rotulo = 'Lastro',
 ): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
-  const modelo =provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
+  const modelo = provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
   // Mesmo corte do runAnthropic, para reaproveitar o cache da persona; na OpenAI vai inteiro.
   const corte = provider === 'anthropic' ? separarSystemDoTurno(req.system_prompt) : { fixo: req.system_prompt, doTurno: '' };
   const system = corte.fixo + sufixoDeSaida(estilo) + instrucaoCotacao(req);
