@@ -74,6 +74,8 @@ export interface ExecutionLogs {
     rajada?: { acao: 'enviar' | 'descartar'; motivo: string; novas: number; humano_no_turno: number; modo: string };
     /** O que `prompt_config.estilo` mudou nas mensagens deste turno (agents/estilo-deterministico.ts). */
     estilo?: MudancasEstilo;
+    /** Resposta repetia pergunta já feita (agents/pergunta-repetida.ts, `prompt_config.nao_repetir_pergunta`). */
+    pergunta_repetida?: { pergunta: string; anterior: string; desfecho: 'reescrita' | 'insistiu' | 'reescrita_falhou' | 'sem_tempo' };
   };
   communication?: Array<{
     query: string;

@@ -672,6 +672,27 @@ export async function getExecutorConfereTarefas(agentId: string): Promise<boolea
   return ligado;
 }
 
+/**
+ * `agents.prompt_config.nao_repetir_pergunta === true`: o Orquestrador refaz uma vez a resposta
+ * que repete pergunta já feita (agents/pergunta-repetida.ts). Só é lida quando a resposta repete.
+ * Falha = `false`.
+ */
+const naoRepetirPerguntaCache = new Map<string, { em: number; ligado: boolean }>();
+
+export async function getNaoRepetirPergunta(agentId: string): Promise<boolean> {
+  const cache = naoRepetirPerguntaCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.ligado;
+  let ligado = false;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    ligado = (ag?.prompt_config as { nao_repetir_pergunta?: unknown } | null)?.nao_repetir_pergunta === true;
+  } catch (err) {
+    console.error('[PerguntaRepetida] prompt_config não lido, sem trava:', err instanceof Error ? err.message : String(err));
+  }
+  naoRepetirPerguntaCache.set(agentId, { em: Date.now(), ligado });
+  return ligado;
+}
+
 // ── Modelo do Executor por agente ─────────────────────────────
 
 /**

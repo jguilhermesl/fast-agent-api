@@ -73,6 +73,13 @@ Estado das chaves no Railway (conferido em 30/09/2026):
   `[LoopRobo]` e `guard_shadow_logs.verdict = loop_robo_pausado`. Volta sozinho quando a repetição sai da janela.
   Áudio/foto/figurinha (texto vazio) e texto de 1 caractere não contam. Simulado em 30 dias: só os 2 loops da Carol.
   `LOOP_ROBO_MODE=log|off` no Railway desliga sem deploy.
+- **Pergunta repetida** (`src/agents/pergunta-repetida.ts`, 29/10/2026): com `prompt_config.nao_repetir_pergunta: true`
+  (só a Canda), se a resposta traz pergunta ("…?") igual ou quase igual (Jaccard ≥ 0,7 das palavras, ou a curta
+  contida na longa) a uma das últimas 4 falas da agente no histórico, o orquestrador refaz a resposta UMA vez, sem
+  ferramentas (`reescreverComInstrucao`), antes dos guards de lastro/cotação/agendamento. Se a nova ainda repetir, vai
+  ela. Não conta: pergunta curta ("Tudo bem?"), ficha com link novo, cliente pediu para repetir. Log
+  `[PerguntaRepetida]`, `guard_shadow_logs.verdict = pergunta_repetida_<reescrita|insistiu|reescrita_falhou|sem_tempo>`
+  e `interaction_logs.payload.logs.turno.pergunta_repetida`. A chave só é lida quando a resposta repete: sem ela, nada muda.
 - **Montador em sombra** (`src/agents/montador/`, 23/10/2026): reproduz em código o nó `Prompt_Variavel` do n8n a partir do banco
   (`montar-prompt.ts` função pura; `texto-fixo.ts` = texto da expressão de 23/10 copiado byte a byte; `carregar-entrada.ts` = as mesmas
   consultas do n8n; `sombra.ts` = comparador), compara com o `system_prompt` que o n8n manda no `/api/chat` e registra a diferença.

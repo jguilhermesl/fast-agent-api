@@ -27,6 +27,7 @@ import {
   getEstiloNoCodigo,
   getMensagensRecebidasDesde,
   getMemoriaPorConversa,
+  getNaoRepetirPergunta,
   conversaSemSaida,
 } from '../services/supabase';
 import { cortarSeConversaNova } from '../memory/conversa';
@@ -35,6 +36,7 @@ import { decidirLoopRobo, JANELA_LOOP_MS, type DecisaoLoop } from './loop-robo';
 import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
 import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
+import { detectarPerguntaRepetida, type PerguntaRepetida } from './pergunta-repetida';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
@@ -247,8 +249,9 @@ async function reescreverComInstrucao(
   result: ProviderResult,
   instrucao: string,
   deadline: Deadline,
+  rotulo = 'Lastro',
 ): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
-  const modelo = provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
+  const modelo =provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
   // Mesmo corte do runAnthropic, para reaproveitar o cache da persona; na OpenAI vai inteiro.
   const corte = provider === 'anthropic' ? separarSystemDoTurno(req.system_prompt) : { fixo: req.system_prompt, doTurno: '' };
   const system = corte.fixo + sufixoDeSaida(estilo) + instrucaoCotacao(req);
@@ -297,7 +300,7 @@ async function reescreverComInstrucao(
     if (!texto.trim()) return null;
     return parseOrchestratorOutput(texto, entregouAoCliente(result.executorTrace.tools_called));
   } catch (err) {
-    console.error('[Lastro] reescrita falhou:', err instanceof Error ? err.message : String(err));
+    console.error(`[${rotulo}] reescrita falhou:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -960,6 +963,44 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     }
   }
 
+  // ── Pergunta repetida (agents/pergunta-repetida.ts) ───────────
+  // Só com `prompt_config.nao_repetir_pergunta: true` (Canda). A detecção é texto puro; a chave só é
+  // lida quando a resposta repete pergunta das últimas 4 falas da agente, então agente sem a chave
+  // não paga leitura nem chamada. Refaz UMA vez, sem ferramentas, antes dos guards (a reescrita
+  // passa por lastro, cotação e agendamento como qualquer resposta). Se a nova ainda repetir, vai ela.
+  let perguntaRepetidaLog: NonNullable<ExecutionLogs['turno']>['pergunta_repetida'];
+  if (parsed.mensagens.length && !parsed.redirect_human) {
+    let repetida: PerguntaRepetida | null = null;
+    try {
+      repetida = detectarPerguntaRepetida(parsed.mensagens.join('\n'), history, req.client_messages);
+    } catch (err) {
+      console.error('[PerguntaRepetida] detecção falhou, resposta segue:', err instanceof Error ? err.message : String(err));
+    }
+    if (repetida && (await getNaoRepetirPergunta(req.agent_id))) {
+      const originais = parsed.mensagens;
+      let desfecho: 'reescrita' | 'insistiu' | 'reescrita_falhou' | 'sem_tempo' = 'sem_tempo';
+      if (!deadline.expired()) {
+        const revisto = await reescreverComInstrucao(req, history, estilo, providerUsed, result, repetida.correcao, deadline, 'PerguntaRepetida');
+        if (revisto && revisto.mensagens.length) {
+          parsed = revisto;
+          desfecho = detectarPerguntaRepetida(revisto.mensagens.join('\n'), history, req.client_messages) ? 'insistiu' : 'reescrita';
+        } else desfecho = 'reescrita_falhou';
+      }
+      perguntaRepetidaLog = { pergunta: repetida.pergunta, anterior: repetida.anterior, desfecho };
+      console.warn(`[PerguntaRepetida] conversation=${req.conversation_id} agent=${req.agent_id} desfecho=${desfecho} pergunta="${repetida.pergunta}" anterior="${repetida.anterior}"`);
+      void logGuardShadow({
+        agent_id: req.agent_id,
+        conversation_id: req.conversation_id,
+        lead_id: req.lead_id,
+        verdict: `pergunta_repetida_${desfecho}`,
+        tokens: [repetida.pergunta, repetida.anterior],
+        mensagens: [...originais, '--- enviado ---', ...parsed.mensagens],
+        tools_called: result.executorTrace.tools_called.map((t) => t.tool),
+        guard_mode: 'enforce',
+      });
+    }
+  }
+
   // ── Guard de grounding (src/agents/guard.ts) ──────────────────
   // Duas checagens determinísticas, sem LLM e sem rede. Em `shadow` (padrão) só
   // grava o veredito; em `enforce` troca o texto por um pedido de tempo. O caso
@@ -1144,7 +1185,13 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   const rajada = config.rajadaMode === 'off' || !ehConversaReal(req.conversation_id)
     ? null
     : await avaliarRajada(req, { inicio, vez, tools: toolsDoTurno, redirect: parsed.redirect_human, descartesAnteriores });
-  const turnoBase = { esperou_fila_ms: vez.esperouMs, cruzamento, nota_cruzamento: nota, ...(juntouPendente ? { juntou_pendente: true } : {}) };
+  const turnoBase = {
+    esperou_fila_ms: vez.esperouMs,
+    cruzamento,
+    nota_cruzamento: nota,
+    ...(juntouPendente ? { juntou_pendente: true } : {}),
+    ...(perguntaRepetidaLog ? { pergunta_repetida: perguntaRepetidaLog } : {}),
+  };
   const rajadaLog = rajada ? { ...rajada, modo: config.rajadaMode } : undefined;
 
   if (rajada && (rajada.acao === 'descartar' || rajada.humano_no_turno > 0)) {
