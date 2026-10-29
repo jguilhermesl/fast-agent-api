@@ -4,6 +4,7 @@ import { config } from '../config';
 import { runOrchestrator } from '../agents/orchestrator';
 import { limparEventosDoProvedor } from '../agents/entrada';
 import { iniciarSombraMontador } from '../agents/montador/executar-sombra';
+import { montarPromptDoBanco } from '../agents/montador/prompt-do-banco';
 
 export const chatRouter = Router();
 
@@ -19,7 +20,10 @@ const ChatRequestSchema = z.object({
   client_message_type:  z.enum(['text', 'image_analysis', 'audio_transcription']).default('text'),
   model_provider:       z.enum(['openai', 'anthropic', 'gemini']).default('openai'),
   model_name:           z.string().default('gpt-4.1-mini'),
-  system_prompt:        z.string().min(1),
+  // Opcional quando `montar_prompt` vem true: o prompt sai do montador (src/agents/montador),
+  // o mesmo texto do Prompt_Variavel do n8n. É o caminho da demonstração pública (demo-chat).
+  system_prompt:        z.string().min(1).optional(),
+  montar_prompt:        z.boolean().optional(),
   tenant_id:            z.string().optional(),
   executor_model:       z.string().optional(),
   cotacao_no_codigo:    z.boolean().optional(),
@@ -51,8 +55,25 @@ chatRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
     return;
   }
 
-  const data = parseResult.data;
+  const corpo = parseResult.data;
   const start = Date.now();
+
+  let systemPrompt = corpo.system_prompt;
+  if (!systemPrompt && corpo.montar_prompt) {
+    try {
+      systemPrompt = await montarPromptDoBanco(corpo.agent_id, corpo.contact_phone);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Chat] montador falhou:', msg);
+      res.status(500).json({ error: 'Não foi possível montar o prompt do agente' });
+      return;
+    }
+  }
+  if (!systemPrompt) {
+    res.status(400).json({ error: 'Invalid request body', details: { fieldErrors: { system_prompt: ['Required'] } } });
+    return;
+  }
+  const data = { ...corpo, system_prompt: systemPrompt };
 
   console.log(`[Chat] → agent=${data.agent_id} conversation=${data.conversation_id} provider=${data.model_provider}/${data.model_name}`);
 
@@ -68,7 +89,8 @@ chatRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
 
   // Montador em sombra (MONTADOR_SOMBRA=on, ver agents/montador/): só compara e registra o prompt montado
   // no código com o `system_prompt` do n8n. Sem a variável devolve null e nada roda. Nunca lança.
-  const concluirSombra = iniciarSombraMontador(data);
+  // Prompt montado aqui mesmo: comparar com ele próprio não mede nada.
+  const concluirSombra = corpo.montar_prompt ? null : iniciarSombraMontador(data);
 
   try {
     const response = await runOrchestrator(data);
