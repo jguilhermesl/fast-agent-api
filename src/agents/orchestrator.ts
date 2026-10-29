@@ -5,7 +5,7 @@ import { getHistory, appendHistory, lockStore, memoriaStore, getUltimoTurno, set
 import { entrarNaFila, sairDaFila, TURN_LOCK_WAIT_MS, type Vez } from '../memory/fila';
 import { detectarCruzamento, comNotaDeCruzamento, type MotivoCruzamento } from './cruzamento';
 import { cumprimentoDeveCalar } from './saudacao-espera';
-import { decidirRajada, ehConversaReal, juntarComPendente, type DecisaoRajada } from './rajada';
+import { decidirRajada, ehConversaReal, ehDemonstracao, juntarComPendente, type DecisaoRajada } from './rajada';
 import { equipeFalouDepoisDoCliente, JANELA_TURNO_MS, turnoComecaComAtendente } from './atendente-assumiu';
 import {
   saveTokenUsage,
@@ -1000,7 +1000,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   // Só bloqueia na interseção das duas evidências: token sem lastro NENHUM **e**
   // nenhuma ferramenta de negócio no turno. Uma sozinha gera falso positivo
   // demais (valor que mora na persona, tarefa resolvida pelo histórico).
-  if (config.guardMode === 'enforce' && semLastro) {
+  if (config.guardMode === 'enforce' && semLastro && !ehDemonstracao(req.conversation_id)) {
     console.error(
       `[Guard] resposta sem lastro bloqueada — tokens=${vereditoGrounding.tokens_sem_lastro.join(',')} tipos=${vereditoTarefa.tipos_pedidos.join(',')} (lead ${req.lead_id})`,
     );
@@ -1033,7 +1033,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
       const lista = semFonte.map((v) => v.texto);
       let desfecho: 'shadow' | 'reescrito' | 'transferido' = 'shadow';
       const mensagensOriginais = parsed.mensagens;
-      if (config.lastroMode === 'enforce') {
+      if (config.lastroMode === 'enforce' && !ehDemonstracao(req.conversation_id)) {
         const revisto = deadline.expired()
           ? null
           : await reescreverSemValorInventado(req, history, estilo, providerUsed, result, lista, fontes, deadline);

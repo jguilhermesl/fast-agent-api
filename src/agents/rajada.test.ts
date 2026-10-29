@@ -242,3 +242,12 @@ describe('ehConversaReal', () => {
     expect(ehConversaReal('eca4d73c-0000-4000-8000-000000000000')).toBe(true);
   });
 });
+
+describe('ehDemonstracao', () => {
+  it('só a conversa da demonstração pública (suite-demo-…)', async () => {
+    const { ehDemonstracao } = await import('./rajada');
+    expect(ehDemonstracao('suite-demo-90a02ec2-abc12345')).toBe(true);
+    expect(ehDemonstracao('suite-123')).toBe(false);
+    expect(ehDemonstracao('6e38e803-5f3a-4be3-98f5-921808f22ca8')).toBe(false);
+  });
+});

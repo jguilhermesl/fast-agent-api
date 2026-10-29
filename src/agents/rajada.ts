@@ -94,6 +94,16 @@ export function ehConversaReal(conversationId: string): boolean {
 }
 
 /**
+ * Demonstração pública (painel /d/<token>, edge function demo-chat): agenda e preços da base são
+ * fictícios de propósito e não existe ferramenta de agenda. Os guardas de data/valor sem fonte só
+ * registram nela, sem reescrever a resposta (29/10/2026: reescreviam "sexta às 10h" para
+ * "vou confirmar com a equipe" e a demonstração parecia quebrada).
+ */
+export function ehDemonstracao(conversationId: string): boolean {
+  return conversationId.startsWith('suite-demo-');
+}
+
+/**
  * Ferramenta que pode rodar de novo no turno seguinte sem efeito para o cliente
  * ou para a agenda: consultas, busca na base e etapa do CRM. Qualquer outra
  * (agendar, `enviar_*` que já mandou texto fixo ou arquivo, encerrar conversa,
