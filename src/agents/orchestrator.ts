@@ -182,9 +182,19 @@ interface ProviderResult {
 
 // ── Valor sem fonte: fontes de fora e reescrita ───────────────
 
-/** Texto curto de quando a reescrita não tirou o valor sem fonte: transfere sem citar número. */
-export const MENSAGEM_VALOR_A_CONFIRMAR =
-  'Vou confirmar esse valor certinho com a equipe e já te retorno por aqui 😊';
+/**
+ * Texto curto de quando a reescrita não tirou o valor sem fonte: transfere sem citar número.
+ * Sem "equipe" (30/10/2026): agente que fala como o dono (Leandro) não pode citar equipe.
+ */
+export const MENSAGEM_VALOR_A_CONFIRMAR = 'Vou confirmar esse valor certinho e já te retorno por aqui 😊';
+
+/**
+ * Quando só a DATA ficou sem fonte (nenhum valor): pede o dia em vez de transferir. A data sem
+ * fonte quase sempre é horário oferecido sem consultar a agenda no turno; a próxima resposta
+ * do cliente faz o agente consultar. Transferir aqui virava "Um momento, já te retorno" e a
+ * conversa parava (Leandro, 12 casos de 20 a 30/10/2026).
+ */
+export const MENSAGEM_DATA_A_CONFIRMAR = 'Me fala o dia e o turno que ficam melhor pra você que eu já vejo os horários.';
 
 /** Instrução dos marcadores de cotação (agents/cotacao.ts), só para agente com a chave ligada. */
 const instrucaoCotacao = (req: ChatRequest): string => (req.cotacao?.ligado ? INSTRUCAO_COTACAO : '');
@@ -229,13 +239,17 @@ async function reescreverSemValorInventado(
   semFonte: string[],
   fontes: string,
   deadline: Deadline,
+  soData = false,
 ): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
+  const seNaoTem = soData
+    ? 'não cite data: pergunte ao cliente o dia e o turno que ficam melhor para ele, sem prometer retorno e sem transferir.'
+    : 'não cite número nem data: diga que vai confirmar e transfira.';
   const instrucao =
     `[Instrução interna, não é do cliente: a sua resposta anterior cita ${semFonte.join(', ')}, ` +
     'e isso não aparece no retorno das ferramentas deste turno, no que já foi enviado nem no seu prompt. ' +
     'Valor e data inventados chegam errados ao paciente. Reescreva a resposta no mesmo formato de saída, ' +
     'usando só valores, datas e profissionais que estão no retorno abaixo. Se o que o cliente pediu não está ' +
-    'no retorno, não cite número nem data: diga que vai confirmar com a equipe e transfira.]\n\n' +
+    `no retorno, ${seNaoTem}]\n\n` +
     `Retorno das ferramentas e textos já enviados:\n${fontes.slice(0, 15000)}`;
   return reescreverComInstrucao(req, history, estilo, provider, result, instrucao, deadline);
 }
@@ -1074,16 +1088,20 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     }
     if (semFonte.length) {
       const lista = semFonte.map((v) => v.texto);
-      let desfecho: 'shadow' | 'reescrito' | 'transferido' = 'shadow';
+      const soData = semFonte.every((v) => v.tipo === 'data');
+      let desfecho: 'shadow' | 'reescrito' | 'transferido' | 'pediu_dia' = 'shadow';
       const mensagensOriginais = parsed.mensagens;
       if (config.lastroMode === 'enforce' && !ehDemonstracao(req.conversation_id)) {
         const revisto = deadline.expired()
           ? null
-          : await reescreverSemValorInventado(req, history, estilo, providerUsed, result, lista, fontes, deadline);
+          : await reescreverSemValorInventado(req, history, estilo, providerUsed, result, lista, fontes, deadline, soData);
         const restou = revisto ? checarValoresSemFonte({ ...baseLastro, mensagens: revisto.mensagens }) : semFonte;
         if (revisto && revisto.mensagens.length && restou.length === 0) {
           parsed = revisto;
           desfecho = 'reescrito';
+        } else if (soData) {
+          parsed = { mensagens: [MENSAGEM_DATA_A_CONFIRMAR], redirect_human: false };
+          desfecho = 'pediu_dia';
         } else {
           parsed = {
             mensagens: [MENSAGEM_VALOR_A_CONFIRMAR],

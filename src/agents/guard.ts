@@ -194,14 +194,64 @@ function centavosDoTexto(texto: string): number[] {
     .map(Number);
 }
 
+// ── Data que o cliente pediu em palavra ─────────────────────────
+//
+// 30/10/2026 (Leandro): "tenho sessão marcada pra sexta, consigo antecipar pra
+// amanhã?" → o agente escreve "sábado, 31/10" e "sexta, 06/11", datas que nenhuma
+// ferramenta devolveu, e o guard troca a resposta por "Um momento, já te retorno".
+// A data veio do cliente, só que em palavra. Aqui "hoje", "amanhã", "depois de
+// amanhã" e o nome do dia viram dd/mm (fuso de Brasília) e entram no corpus. O dia
+// da semana vale para as duas próximas ocorrências ("sexta" e "sexta da semana
+// que vem"). Só a fala do cliente e o histórico confiável entram: o agente não
+// cria fonte para si mesmo escrevendo "terça".
+
+const DIAS_DA_SEMANA: Array<[RegExp, number]> = [
+  [/\bdomingo\b/, 0],
+  [/\bsegunda\b/, 1],
+  [/\bter[cç]a\b/, 2],
+  [/\bquarta\b/, 3],
+  [/\bquinta\b/, 4],
+  [/\bsexta\b/, 5],
+  [/\bs[aá]bado\b/, 6],
+];
+
+/** Dia/mês e dia da semana de `agora` no fuso de Brasília, somando `dias`. */
+function diaEmBrasilia(agora: Date, dias: number): { ddmm: string; semana: number } {
+  const d = new Date(agora.getTime() - 3 * 60 * 60 * 1000 + dias * 24 * 60 * 60 * 1000);
+  return { ddmm: pad2(String(d.getUTCDate())) + '/' + pad2(String(d.getUTCMonth() + 1)), semana: d.getUTCDay() };
+}
+
+export function datasDitasPeloCliente(texto: string, agora: Date = new Date()): string[] {
+  const t = texto.toLowerCase();
+  const out = new Set<string>();
+  if (/\bhoje\b/.test(t)) out.add(diaEmBrasilia(agora, 0).ddmm);
+  // Sem `\b` depois do "ã": em JS ele não é letra de palavra e o `\b` nunca casa.
+  if (/\bamanh[ãa]/.test(t)) out.add(diaEmBrasilia(agora, 1).ddmm);
+  if (/depois de amanh[ãa]/.test(t)) out.add(diaEmBrasilia(agora, 2).ddmm);
+  for (const [re, semana] of DIAS_DA_SEMANA) {
+    if (!re.test(t)) continue;
+    let achados = 0;
+    for (let i = 0; i <= 14 && achados < 2; i++) {
+      const d = diaEmBrasilia(agora, i);
+      if (d.semana === semana) {
+        out.add(d.ddmm);
+        achados++;
+      }
+    }
+  }
+  return [...out];
+}
+
 export function checarValoresSemFonte(input: {
   mensagens: string[];
   toolResults: string;
   clientMessage: string;
   history: string;
   systemPrompt: string;
+  agora?: Date;
 }): ValorSemFonte[] {
-  const corpus = [input.toolResults, input.clientMessage, input.history, input.systemPrompt].join(' ');
+  const datasDoCliente = datasDitasPeloCliente(`${input.clientMessage}\n${input.history}`, input.agora).join(' ');
+  const corpus = [input.toolResults, input.clientMessage, input.history, input.systemPrompt, datasDoCliente].join(' ');
   const canonicos = new Set(extrairTokens(corpus));
   const sopa = norm(corpus);
   const temFonte = (t: string) => canonicos.has(t) || sopa.includes(t);

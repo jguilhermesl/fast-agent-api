@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checarValoresSemFonte } from './guard';
+import { checarValoresSemFonte, datasDitasPeloCliente } from './guard';
 
 const vazio = { clientMessage: '', history: '', systemPrompt: '' };
 
@@ -93,5 +93,63 @@ describe('checarValoresSemFonte', () => {
       mensagens: ['São R$ 24,00 aqui e R$ 136,00 na parceira, total de R$ 160,00.'],
     });
     expect(r).toEqual([]);
+  });
+});
+
+// 30/10/2026 ~13h BRT (16h UTC), sexta-feira: suíte do Leandro.
+const sexta3010 = new Date('2026-10-30T16:00:00Z');
+
+describe('datasDitasPeloCliente', () => {
+  it('hoje, amanhã e depois de amanhã no fuso de Brasília', () => {
+    expect(datasDitasPeloCliente('dá pra hoje? ou amanhã? ou depois de amanhã', sexta3010).sort()).toEqual(['01/11', '30/10', '31/10']);
+  });
+
+  it('dia da semana vale para as duas próximas ocorrências', () => {
+    expect(datasDitasPeloCliente('tenho sessão marcada pra sexta', sexta3010)).toEqual(['30/10', '06/11']);
+    expect(datasDitasPeloCliente('pode ser terça?', sexta3010)).toEqual(['03/11', '10/11']);
+    expect(datasDitasPeloCliente('sábado de manhã', sexta3010)).toEqual(['31/10', '07/11']);
+  });
+
+  it('meia-noite UTC ainda é o dia anterior em Brasília', () => {
+    expect(datasDitasPeloCliente('amanhã', new Date('2026-10-31T01:30:00Z'))).toEqual(['31/10']);
+  });
+
+  it('sem palavra de data, nada', () => {
+    expect(datasDitasPeloCliente('quanto custa a sessão?', sexta3010)).toEqual([]);
+  });
+});
+
+describe('checarValoresSemFonte com data dita em palavra', () => {
+  it('caso real da suíte: "antecipar pra amanhã" → "sábado, 31/10" tem fonte', () => {
+    const r = checarValoresSemFonte({
+      ...vazio,
+      agora: sexta3010,
+      toolResults: '',
+      clientMessage: 'tenho sessão marcada pra sexta, consigo antecipar pra amanhã no horário do almoço?',
+      mensagens: ['Consigo sim. Me fala o horário que ficou marcado na sexta, 06/11 pra eu ajustar e te passo as opções de sábado, 31/10.'],
+    });
+    expect(r).toEqual([]);
+  });
+
+  it('data que o cliente não pediu continua sem fonte (caso real 30/10 01:24: "terça, 03/11" sem consultar a agenda)', () => {
+    const r = checarValoresSemFonte({
+      ...vazio,
+      agora: new Date('2026-10-30T04:24:00Z'),
+      toolResults: '',
+      clientMessage: 'Olá! Gostaria de agendar uma sessão de quiropraxia em Ibiporã.',
+      mensagens: ['Tenho terça, 03/11 às 10h ou às 11h em Ibiporã, qual fica melhor pra você?'],
+    });
+    expect(r.map((v) => v.texto)).toEqual(['03/11']);
+  });
+
+  it('o próprio agente escrever "terça" no histórico não vira fonte só pela palavra do cliente', () => {
+    const r = checarValoresSemFonte({
+      ...vazio,
+      agora: sexta3010,
+      toolResults: '',
+      clientMessage: 'pode ser',
+      mensagens: ['Fechado, quinta, 05/11 às 10h.'],
+    });
+    expect(r.map((v) => v.texto)).toEqual(['05/11']);
   });
 });
