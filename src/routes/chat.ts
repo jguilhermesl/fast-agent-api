@@ -18,7 +18,7 @@ const ChatRequestSchema = z.object({
   scoped_client_id:     z.string().min(1),
   client_messages:      z.string().min(1),
   client_message_type:  z.enum(['text', 'image_analysis', 'audio_transcription']).default('text'),
-  model_provider:       z.enum(['openai', 'anthropic', 'gemini']).default('openai'),
+  model_provider:       z.enum(['openai', 'anthropic', 'gemini', 'openrouter']).default('openai'),
   model_name:           z.string().default('gpt-4.1-mini'),
   // Opcional quando `montar_prompt` vem true: o prompt sai do montador (src/agents/montador),
   // o mesmo texto do Prompt_Variavel do n8n. É o caminho da demonstração pública (demo-chat).

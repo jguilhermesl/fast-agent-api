@@ -13,6 +13,9 @@ export const config = {
 
   openaiApiKey: required('OPENAI_API_KEY'),
   anthropicApiKey: required('ANTHROPIC_API_KEY'),
+  // Opcional: só agente (ou suíte) com model_provider 'openrouter' usa. Sem a chave, esse
+  // provedor falha e cai no fallback em gpt-5.4 como qualquer outro erro de provedor.
+  openrouterApiKey: process.env.OPENROUTER_API_KEY ?? '',
   // googleApiKey: required('GOOGLE_API_KEY'),
 
   supabaseUrl: required('SUPABASE_URL'),

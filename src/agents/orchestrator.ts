@@ -76,6 +76,18 @@ const LLM_TIMEOUT_MS = 60_000;
 
 const openai    = new OpenAI({ apiKey: config.openaiApiKey, timeout: LLM_TIMEOUT_MS, maxRetries: 1 });
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey, timeout: LLM_TIMEOUT_MS, maxRetries: 1 });
+// OpenRouter fala o mesmo chat.completions da OpenAI: o orquestrador roda com runOpenAI e só
+// troca o cliente. Abre modelo de outro fornecedor (deepseek etc.) sem caminho novo (30/10/2026).
+const openrouter = config.openrouterApiKey
+  ? new OpenAI({ apiKey: config.openrouterApiKey, baseURL: 'https://openrouter.ai/api/v1', timeout: LLM_TIMEOUT_MS, maxRetries: 1 })
+  : null;
+
+/** Cliente de chat.completions do provedor: 'openrouter' usa o OpenRouter, o resto a OpenAI. */
+function clienteChat(provider: string): OpenAI {
+  if (provider !== 'openrouter') return openai;
+  if (!openrouter) throw new Error('model_provider "openrouter" sem OPENROUTER_API_KEY no serviço');
+  return openrouter;
+}
 
 const MAX_TOOL_ROUNDS = 5;
 
@@ -291,7 +303,7 @@ async function reescreverComInstrucao(
       tokensCached = uso.cache_read_input_tokens ?? 0;
       tokensOut = r.usage.output_tokens ?? 0;
     } else {
-      const r = await openai.chat.completions.create({
+      const r = await clienteChat(modelo === req.model_name ? provider : 'openai').chat.completions.create({
         model: modelo,
         messages: [{ role: 'system', content: system }, ...conversa],
         ...amostragemDoModelo(modelo, 0.2),
@@ -349,7 +361,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
     // Round 0: força o executor (exceto em saudações/despedidas)
     // Rounds seguintes: auto — o modelo decide se precisa de mais informações
     const toolChoice = (round === 0 && forceExecutor) ? 'required' : 'auto';
-    const response = await openai.chat.completions.create({
+    const response = await clienteChat(req.model_provider).chat.completions.create({
       model: req.model_name,
       messages,
       tools,
@@ -825,6 +837,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     switch (req.model_provider) {
       case 'openai':    result = await runOpenAI(req, history, deadline, nota, estilo);    break;
       case 'anthropic': result = await runAnthropic(req, history, deadline, nota, estilo); break;
+      case 'openrouter': result = await runOpenAI(req, history, deadline, nota, estilo); break;
       /**
        * Provedor fora dos dois implementados.
        *
@@ -841,7 +854,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
        */
       default:
         throw new Error(
-          `model_provider "${req.model_provider}" não implementado (só openai e anthropic). ` +
+          `model_provider "${req.model_provider}" não implementado (só openai, anthropic e openrouter). ` +
           `Agente ${req.agent_id} está configurado num provedor que este serviço não roda.`,
         );
     }

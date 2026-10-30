@@ -5,7 +5,7 @@
 import type { Deadline } from '../services/deadline';
 import type { EstiloConfig, MudancasEstilo } from '../agents/estilo-deterministico';
 
-export type ModelProvider = 'openai' | 'anthropic' | 'gemini';
+export type ModelProvider = 'openai' | 'anthropic' | 'gemini' | 'openrouter';
 
 // Payload que chega do n8n via POST /api/chat
 export interface ChatRequest {
