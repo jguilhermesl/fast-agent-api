@@ -247,7 +247,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         tools,
         tool_choice: 'auto',
         ...amostragemDoModelo(modeloDaVez, 0.3),
-        ...(viaOpenRouter ? extrasOpenRouter() : {}),
+        ...(viaOpenRouter ? extrasOpenRouter(input.conversation_id) : {}),
       } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { timeout: capTimeout(60_000, input.deadline) });
     } catch (err) {
       // Modelo do OpenRouter falhou (fora do ar, nenhum fornecedor aceita data_collection

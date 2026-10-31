@@ -43,7 +43,7 @@ type Amostragem = Pick<
 >;
 
 /** Formato unificado do OpenRouter para esforço de raciocínio (ele traduz para cada fornecedor). */
-type AmostragemOpenRouter = { reasoning: { effort: 'none' } };
+type AmostragemOpenRouter = { reasoning: { effort: 'none' | 'low' } };
 
 /**
  * Pelo OpenRouter o id vem com fornecedor (`openai/gpt-6-luna`, 31/10/2026): a regra da
@@ -52,6 +52,10 @@ type AmostragemOpenRouter = { reasoning: { effort: 'none' } };
  */
 export function amostragemDoModelo(modelo: string, temperature: number): Amostragem | AmostragemOpenRouter {
   const base = semFornecedor(modelo);
+  // Claude 5.x pelo OpenRouter: `temperature` dá erro e o raciocínio vem ligado por padrão
+  // (mais token e mais demora a cada rodada). `low` é o que a Anthropic indica para
+  // executor e chat. No caminho direto da Anthropic nada disso é mandado.
+  if (base !== modelo && /^claude-(haiku|sonnet|opus)-5\b/.test(base)) return { reasoning: { effort: 'low' } };
   if (/^gpt-5\.6\b/.test(base) || /^gpt-6-luna\b/.test(base) || /^gpt-6\.1-terra\b/.test(base)) {
     if (base !== modelo) return { reasoning: { effort: 'none' } };
     // A API aceita `'none'` desde a família 5.6, mas o `ReasoningEffort` do SDK
