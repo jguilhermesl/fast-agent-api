@@ -184,3 +184,30 @@ describe('inferModelProvider', () => {
     expect(inferModelProvider('llama-3')).toBe('unknown');
   });
 });
+
+describe('OpenRouter (31/10/2026)', () => {
+  it('id com barra é provedor openrouter', () => {
+    expect(inferModelProvider('deepseek/deepseek-v4.1-flash')).toBe('openrouter');
+    expect(inferModelProvider('openai/gpt-6-luna')).toBe('openrouter');
+  });
+
+  it('sem usage.cost, tenta a tarifa do modelo sem o fornecedor', () => {
+    expect(tarifaDe('openai/gpt-6-luna')).toEqual(tarifaDe('gpt-6-luna'));
+    expect(tarifaDe('anthropic/claude-haiku-5.5')).toEqual(tarifaDe('claude-haiku-5-5'));
+    expect(tarifaDe('anthropic/claude-sonnet-5.5')).toEqual(tarifaDe('claude-sonnet-5-5'));
+  });
+
+  it('custo devolvido pelo OpenRouter ganha da tarifa', () => {
+    const base = { agent_id: 'a', conversation_id: 'c', lead_id: 'l', model: 'deepseek/deepseek-v4.1-flash', tokensIn: 10_000, tokensOut: 100 };
+    expect(buildTokenLogEntry({ ...base, custoUsd: 0.00123456789 }).estimated_cost_usd).toBe(0.00123457);
+    expect(buildTokenLogEntry({ ...base, custoUsd: 0.00123456789 }).model_provider).toBe('openrouter');
+  });
+
+  it('custo ausente, nulo ou inválido cai na tarifa', () => {
+    const base = { agent_id: 'a', conversation_id: 'c', lead_id: 'l', model: 'gpt-5.4', tokensIn: 1_000_000, tokensOut: 0 };
+    expect(buildTokenLogEntry(base).estimated_cost_usd).toBe(2.5);
+    expect(buildTokenLogEntry({ ...base, custoUsd: null }).estimated_cost_usd).toBe(2.5);
+    expect(buildTokenLogEntry({ ...base, custoUsd: -1 }).estimated_cost_usd).toBe(2.5);
+    expect(buildTokenLogEntry({ ...base, custoUsd: Number.NaN }).estimated_cost_usd).toBe(2.5);
+  });
+});

@@ -41,6 +41,8 @@ import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
+import { MODELO_FALLBACK_OPENAI, pedidoDoFallback } from './fallback-openai';
+import { criarClienteOpenRouter, extrasOpenRouter, custoDoOpenRouter, somarCusto, mensagensParaOpenRouter } from '../services/openrouter';
 import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
@@ -78,9 +80,9 @@ const openai    = new OpenAI({ apiKey: config.openaiApiKey, timeout: LLM_TIMEOUT
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey, timeout: LLM_TIMEOUT_MS, maxRetries: 1 });
 // OpenRouter fala o mesmo chat.completions da OpenAI: o orquestrador roda com runOpenAI e só
 // troca o cliente. Abre modelo de outro fornecedor (deepseek etc.) sem caminho novo (30/10/2026).
-const openrouter = config.openrouterApiKey
-  ? new OpenAI({ apiKey: config.openrouterApiKey, baseURL: 'https://openrouter.ai/api/v1', timeout: LLM_TIMEOUT_MS, maxRetries: 1 })
-  : null;
+// Cliente, extras (`data_collection: deny`, custo real) e cache da Anthropic pelo OpenRouter:
+// services/openrouter.ts (31/10/2026).
+const openrouter = criarClienteOpenRouter(config.openrouterApiKey, LLM_TIMEOUT_MS);
 
 /** Cliente de chat.completions do provedor: 'openrouter' usa o OpenRouter, o resto a OpenAI. */
 function clienteChat(provider: string): OpenAI {
@@ -91,8 +93,7 @@ function clienteChat(provider: string): OpenAI {
 
 const MAX_TOOL_ROUNDS = 5;
 
-/** Modelo OpenAI usado quando o provedor principal (Anthropic) falha. */
-const MODELO_FALLBACK_OPENAI = 'gpt-5.4';
+// Modelo e pedido do fallback (provedor principal falhou): agents/fallback-openai.ts.
 
 /** Modelos da Anthropic que já recusaram `tool_choice` any/tool neste processo. */
 const modelosSemFerramentaForcada = new Set<string>();
@@ -186,6 +187,8 @@ interface ProviderResult {
   tokensOut: number;
   /** Fatia de `tokensIn` servida pelo cache de prefixo. Ver TokenLogEntry. */
   tokensCached: number;
+  /** Custo cobrado, quando o provedor devolve (OpenRouter). Ausente/null = tarifa. */
+  custoUsd?: number | null;
   model: string;
   rounds: number;
   executorTrace: ExecutorTrace;
@@ -289,6 +292,7 @@ async function reescreverComInstrucao(
   ];
   try {
     let texto = '', tokensIn = 0, tokensOut = 0, tokensCached = 0, modeloUsado = modelo;
+    let custoUsd: number | null = null;
     if (provider === 'anthropic') {
       const r = await anthropic.messages.create({
         model: modelo,
@@ -303,11 +307,16 @@ async function reescreverComInstrucao(
       tokensCached = uso.cache_read_input_tokens ?? 0;
       tokensOut = r.usage.output_tokens ?? 0;
     } else {
-      const r = await clienteChat(modelo === req.model_name ? provider : 'openai').chat.completions.create({
+      const provedorDaVez = modelo === req.model_name ? provider : 'openai';
+      const viaOpenRouter = provedorDaVez === 'openrouter';
+      const mensagens: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: 'system', content: system }, ...conversa];
+      const r = await clienteChat(provedorDaVez).chat.completions.create({
         model: modelo,
-        messages: [{ role: 'system', content: system }, ...conversa],
+        messages: viaOpenRouter ? mensagensParaOpenRouter(modelo, mensagens) : mensagens,
         ...amostragemDoModelo(modelo, 0.2),
-      }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+        ...(viaOpenRouter ? extrasOpenRouter() : {}),
+      } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+      if (viaOpenRouter) custoUsd = somarCusto(0, custoDoOpenRouter(r.usage));
       texto = r.choices[0].message.content ?? '';
       tokensIn = r.usage?.prompt_tokens ?? 0;
       tokensOut = r.usage?.completion_tokens ?? 0;
@@ -322,6 +331,7 @@ async function reescreverComInstrucao(
       tokensIn,
       tokensOut,
       tokensCached,
+      custoUsd,
     }));
     if (!texto.trim()) return null;
     return parseOrchestratorOutput(texto, entregouAoCliente(result.executorTrace.tools_called));
@@ -352,6 +362,9 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
   let totalIn = 0, totalOut = 0, totalCached = 0, rounds = 0;
   const allExecutorTraces: ExecutorTrace[] = [];
   const communications: Array<{ query: string; result: string }> = [];
+  // OpenRouter: mesmo contrato, outro cliente, e três extras (services/openrouter.ts).
+  const viaOpenRouter = req.model_provider === 'openrouter';
+  let custoUsd: number | null = viaOpenRouter ? 0 : null;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     // Orçamento agregado do turno (services/deadline.ts) — checado antes de
@@ -363,13 +376,15 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
     const toolChoice = (round === 0 && forceExecutor) ? 'required' : 'auto';
     const response = await clienteChat(req.model_provider).chat.completions.create({
       model: req.model_name,
-      messages,
+      messages: viaOpenRouter ? mensagensParaOpenRouter(req.model_name, messages) : messages,
       tools,
       tool_choice: toolChoice,
       // gpt-5.6 recusa `temperature` e exige `reasoning_effort: 'none'` para
       // aceitar function tools aqui; o resto segue com temperatura fixa.
       ...amostragemDoModelo(req.model_name, 0.2),
-    }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+      ...(viaOpenRouter ? extrasOpenRouter() : {}),
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
+    if (viaOpenRouter) custoUsd = somarCusto(custoUsd, custoDoOpenRouter(response.usage));
 
     const msg = response.choices[0].message;
     totalIn  += response.usage?.prompt_tokens     ?? 0;
@@ -383,6 +398,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
         tokensIn: totalIn,
         tokensOut: totalOut,
         tokensCached: totalCached,
+        custoUsd,
         model: response.model,
         rounds,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
@@ -896,7 +912,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         providerUsed = 'openai';
         // gpt-5.4: o modelo em que os agentes foram validados. O gpt-4.1-mini de
         // antes respondia, mas pior, e ninguém percebia (ver logError acima).
-        result = await runOpenAI({ ...req, model_name: MODELO_FALLBACK_OPENAI }, history, deadline, nota, estilo);
+        result = await runOpenAI(pedidoDoFallback(req), history, deadline, nota, estilo);
       } catch (fallbackErr) {
         const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         await logError({
@@ -935,6 +951,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     tokensIn: result.tokensIn,
     tokensOut: result.tokensOut,
     tokensCached: result.tokensCached,
+    custoUsd: result.custoUsd,
   });
   const costUsd = tokenEntry.estimated_cost_usd;
   await saveTokenUsage(tokenEntry);

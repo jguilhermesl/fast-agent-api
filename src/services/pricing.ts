@@ -1,4 +1,5 @@
 import type { TokenLogEntry } from '../types';
+import { semFornecedor } from './openrouter';
 
 /**
  * Tarifa dos modelos e cálculo de custo.
@@ -94,7 +95,13 @@ const TARIFA_DESCONHECIDA: Tarifa = { input: 1, output: 3 };
  * Resolve a tarifa pelo prefixo **mais longo** que casa com o nome do modelo.
  * `gpt-5.4-mini-2026-03-17` casa `gpt-5.4` e `gpt-5.4-mini`; ganha o segundo.
  */
-export function tarifaDe(model: string): Tarifa {
+export function tarifaDe(modelo: string): Tarifa {
+  // Id do OpenRouter (`anthropic/claude-haiku-5.5`, 31/10/2026): tenta a tarifa do modelo sem
+  // o fornecedor, com o "5.5" da Anthropic no formato da casa ("5-5"). Só pesa quando a
+  // resposta não trouxe `usage.cost` (ver `custoUsd` em buildTokenLogEntry).
+  const model = modelo.includes('/')
+    ? semFornecedor(modelo).replace(/^(claude-[a-z]+-\d+)\.(\d+)/, '$1-$2')
+    : modelo;
   const exata = TARIFAS_POR_1M[model];
   if (exata) return exata;
 
@@ -110,6 +117,7 @@ export function tarifaDe(model: string): Tarifa {
 }
 
 export function inferModelProvider(modelName: string): string {
+  if (modelName.includes('/')) return 'openrouter';
   if (modelName.startsWith('gpt') || modelName.startsWith('o1') || modelName.startsWith('o3')) return 'openai';
   if (modelName.startsWith('claude')) return 'anthropic';
   if (modelName.startsWith('gemini')) return 'gemini';
@@ -167,6 +175,11 @@ export interface TokenLogParams {
   tokensOut: number;
   /** Fatia de `tokensIn` servida pelo cache de prefixo. Ausente = 0 (sem cache). */
   tokensCached?: number;
+  /**
+   * Custo cobrado de fato, quando o provedor devolve (OpenRouter: `usage.cost`). Ganha da
+   * tarifa: com centenas de modelos, a tabela acima nunca vai ter todos. `null`/ausente = tarifa.
+   */
+  custoUsd?: number | null;
 }
 
 /**
@@ -191,7 +204,10 @@ export function buildTokenLogEntry(params: TokenLogParams): TokenLogEntry {
     input_tokens: params.tokensIn,
     output_tokens: params.tokensOut,
     total_tokens: params.tokensIn + params.tokensOut,
-    estimated_cost_usd: calcCostUsd(params.model, params.tokensIn, params.tokensOut, tokensCached),
+    estimated_cost_usd:
+      typeof params.custoUsd === 'number' && Number.isFinite(params.custoUsd) && params.custoUsd >= 0
+        ? parseFloat(params.custoUsd.toFixed(8))
+        : calcCostUsd(params.model, params.tokensIn, params.tokensOut, tokensCached),
     cached_input_tokens: tokensCached,
     pricing_version: CURRENT_PRICING_VERSION,
   };

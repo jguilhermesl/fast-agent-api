@@ -35,14 +35,25 @@
  * em `/v1/responses`. Mandar `'none'` para eles só trocaria um 400 por outro.
  */
 import type OpenAI from 'openai';
+import { semFornecedor } from '../services/openrouter';
 
 type Amostragem = Pick<
   OpenAI.Chat.Completions.ChatCompletionCreateParams,
   'temperature' | 'reasoning_effort'
 >;
 
-export function amostragemDoModelo(modelo: string, temperature: number): Amostragem {
-  if (/^gpt-5\.6\b/.test(modelo) || /^gpt-6-luna\b/.test(modelo) || /^gpt-6\.1-terra\b/.test(modelo)) {
+/** Formato unificado do OpenRouter para esforço de raciocínio (ele traduz para cada fornecedor). */
+type AmostragemOpenRouter = { reasoning: { effort: 'none' } };
+
+/**
+ * Pelo OpenRouter o id vem com fornecedor (`openai/gpt-6-luna`, 31/10/2026): a regra da
+ * família vale do mesmo jeito, mas o esforço vai no campo `reasoning` dele, não em
+ * `reasoning_effort`. Modelo de outro fornecedor (deepseek, qwen…) segue com temperatura.
+ */
+export function amostragemDoModelo(modelo: string, temperature: number): Amostragem | AmostragemOpenRouter {
+  const base = semFornecedor(modelo);
+  if (/^gpt-5\.6\b/.test(base) || /^gpt-6-luna\b/.test(base) || /^gpt-6\.1-terra\b/.test(base)) {
+    if (base !== modelo) return { reasoning: { effort: 'none' } };
     // A API aceita `'none'` desde a família 5.6, mas o `ReasoningEffort` do SDK
     // instalado ainda não o lista. O cast fica restrito a este ponto: subir a
     // versão do SDK só por causa de um literal de string mexeria no contrato de
