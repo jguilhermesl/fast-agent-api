@@ -15,6 +15,10 @@
 //     Se TODAS as mensagens de texto sumirem, devolve as originais.
 //     `emoji: true` ou ausente não mexe. Símbolos fora do Extended_Pictographic (✓ ★ →)
 //     ficam; © ® ™ só saem em forma de emoji (com FE0F).
+//   - emoji === "raro" (31/10/2026): igual a `false`, mas mantém os emojis que são
+//     informação no bloco de preço e documento (`EMOJI_INFORMATIVO`: 💳 💰 📄 📍). Medido na
+//     Duda: 63,5% das falas tinham emoji e 45,1% terminavam em 😊; o atendente humano da
+//     mesma clínica usa em 14,7%. O 😊 de assinatura sai; o 💳/💰 do bloco de cotação fica.
 //   - dividir === true: parágrafo separado por linha em branco vira balão próprio, com
 //     teto de 4 balões de texto por turno (o excedente cola no último, com linha em
 //     branco). dividir === false: texto seguido vira uma mensagem só, com linha em
@@ -28,9 +32,12 @@
 import { lerMarcador } from './midia-no-fluxo';
 
 export interface EstiloConfig {
-  emoji?: boolean;
+  emoji?: boolean | 'raro';
   dividir?: boolean;
 }
+
+/** Emojis que marcam informação nos blocos de preço e documento: ficam com `emoji: "raro"`. */
+export const EMOJI_INFORMATIVO: ReadonlySet<string> = new Set(['💳', '💰', '📄', '📍']);
 
 export interface MudancasEstilo {
   emojisRemovidos: number;
@@ -53,7 +60,7 @@ export function lerEstilo(valor: unknown): EstiloConfig | undefined {
   if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return undefined;
   const v = valor as Record<string, unknown>;
   return {
-    ...(typeof v.emoji === 'boolean' ? { emoji: v.emoji } : {}),
+    ...(typeof v.emoji === 'boolean' || v.emoji === 'raro' ? { emoji: v.emoji } : {}),
     ...(typeof v.dividir === 'boolean' ? { dividir: v.dividir } : {}),
   };
 }
@@ -159,7 +166,7 @@ function resolverSentinelas(texto: string): string {
 const KEYCAP_NO_INICIO = /(^|\n)([ \t]*)([0-9])\uFE0F?\u20E3/g;
 const KEYCAP_NO_MEIO = /([0-9])\uFE0F?\u20E3/g;
 
-function tirarEmoji(texto: string): { texto: string; removidos: number } {
+function tirarEmoji(texto: string, manter?: ReadonlySet<string>): { texto: string; removidos: number } {
   let removidos = 0;
   const comNumeros = texto
     .replace(KEYCAP_NO_INICIO, (_, quebra: string, recuo: string, digito: string) => {
@@ -170,7 +177,8 @@ function tirarEmoji(texto: string): { texto: string; removidos: number } {
       removidos++;
       return digito;
     });
-  const marcado = comNumeros.replace(EMOJI, () => {
+  const marcado = comNumeros.replace(EMOJI, (m: string) => {
+    if (manter?.has(m.replace(/\uFE0F/g, ''))) return m;
     removidos++;
     return SENTINELA;
   });
@@ -247,8 +255,8 @@ export function aplicarEstilo(
 
     const { texto: protegido, guardados } = protegerTrechos(original);
     let t = protegido;
-    if (estilo.emoji === false) {
-      const r = tirarEmoji(t);
+    if (estilo.emoji === false || estilo.emoji === 'raro') {
+      const r = tirarEmoji(t, estilo.emoji === 'raro' ? EMOJI_INFORMATIVO : undefined);
       t = r.texto;
       emojisRemovidos += r.removidos;
     }
