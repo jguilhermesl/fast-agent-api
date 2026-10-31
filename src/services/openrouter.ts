@@ -8,14 +8,20 @@
  * a família recusa) e o executor nem conhecia o provedor. Este módulo junta o que é
  * específico do OpenRouter num lugar só, em funções puras, para os dois caminhos usarem.
  *
- * Três coisas que todo pedido ao OpenRouter leva (`extrasOpenRouter`):
+ * O que todo pedido ao OpenRouter leva (`extrasOpenRouter`):
  *   - `provider.data_collection: 'deny'`: só fornecedores que não guardam nem treinam com o
  *     pedido. A conversa é de paciente (dado sensível na LGPD). Um modelo sem fornecedor que
  *     aceite isso devolve erro, o orquestrador cai no gpt-5.4 e o erro fica em
  *     `agent_error_logs`: melhor que mandar o dado para quem treina com ele.
- *   - `usage.include: true`: a resposta traz `usage.cost`, o valor cobrado em USD. É ele que
- *     vai para `llm_usage_logs.estimated_cost_usd`, sem depender de tabela de tarifa.
+ *   - `provider.ignore` com os hosts do Google (decisão da Fast IA: nada de Google; o
+ *     OpenRouter serve Claude também pelo Vertex).
+ *   - `session_id` = id da conversa: o OpenRouter devolve as rodadas seguintes ao mesmo
+ *     fornecedor enquanto o cache está quente (sessão de 10 min).
  *   - Cabeçalhos de identificação do app (`HTTP-Referer`, `X-Title`), pedidos pela documentação.
+ *
+ * O custo vem sempre em `usage.cost` (o `usage.include` foi descontinuado e não faz nada),
+ * e é ele que vai para `llm_usage_logs.estimated_cost_usd`. Fonte das regras:
+ * `Plataforma Agents/estudo-20261031-mercado/README.md`, seção 6.
  */
 import OpenAI from 'openai';
 
@@ -45,9 +51,18 @@ export function criarClienteOpenRouter(apiKey: string, timeout: number): OpenAI 
   });
 }
 
+/** Hosts que o OpenRouter nunca deve usar (regra da Fast IA: nada de Google). */
+export const HOSTS_BLOQUEADOS = ['google-vertex', 'google-ai-studio'] as const;
+
 /** Campos que só o OpenRouter entende. Vão em toda chamada para ele (ver o topo do arquivo). */
-export function extrasOpenRouter(): { provider: { data_collection: 'deny' }; usage: { include: true } } {
-  return { provider: { data_collection: 'deny' }, usage: { include: true } };
+export function extrasOpenRouter(sessaoId?: string): {
+  provider: { data_collection: 'deny'; ignore: string[] };
+  session_id?: string;
+} {
+  return {
+    provider: { data_collection: 'deny', ignore: [...HOSTS_BLOQUEADOS] },
+    ...(sessaoId ? { session_id: sessaoId } : {}),
+  };
 }
 
 /** `usage.cost` do OpenRouter, em USD. Ausente ou inválido = `undefined` (aí o custo sai da tarifa). */

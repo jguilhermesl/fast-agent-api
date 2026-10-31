@@ -40,8 +40,15 @@ describe('semFornecedor', () => {
 });
 
 describe('extrasOpenRouter', () => {
-  it('nega coleta de dados e pede o custo real', () => {
-    expect(extrasOpenRouter()).toEqual({ provider: { data_collection: 'deny' }, usage: { include: true } });
+  it('nega coleta de dados e bloqueia os hosts do Google', () => {
+    expect(extrasOpenRouter()).toEqual({ provider: { data_collection: 'deny', ignore: ['google-vertex', 'google-ai-studio'] } });
+  });
+
+  it('com a conversa, manda session_id para o cache colante', () => {
+    expect(extrasOpenRouter('lead-1')).toEqual({
+      provider: { data_collection: 'deny', ignore: ['google-vertex', 'google-ai-studio'] },
+      session_id: 'lead-1',
+    });
   });
 });
 

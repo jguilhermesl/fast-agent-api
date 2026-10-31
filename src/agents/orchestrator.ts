@@ -314,7 +314,7 @@ async function reescreverComInstrucao(
         model: modelo,
         messages: viaOpenRouter ? mensagensParaOpenRouter(modelo, mensagens) : mensagens,
         ...amostragemDoModelo(modelo, 0.2),
-        ...(viaOpenRouter ? extrasOpenRouter() : {}),
+        ...(viaOpenRouter ? extrasOpenRouter(req.conversation_id) : {}),
       } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
       if (viaOpenRouter) custoUsd = somarCusto(0, custoDoOpenRouter(r.usage));
       texto = r.choices[0].message.content ?? '';
@@ -382,7 +382,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
       // gpt-5.6 recusa `temperature` e exige `reasoning_effort: 'none'` para
       // aceitar function tools aqui; o resto segue com temperatura fixa.
       ...amostragemDoModelo(req.model_name, 0.2),
-      ...(viaOpenRouter ? extrasOpenRouter() : {}),
+      ...(viaOpenRouter ? extrasOpenRouter(req.conversation_id) : {}),
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
     if (viaOpenRouter) custoUsd = somarCusto(custoUsd, custoDoOpenRouter(response.usage));
 

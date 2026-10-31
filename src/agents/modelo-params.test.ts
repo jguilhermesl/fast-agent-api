@@ -48,11 +48,21 @@ describe('amostragemDoModelo — id do OpenRouter (31/10/2026)', () => {
 
   it('outros fornecedores seguem com temperatura', () => {
     expect(amostragemDoModelo('deepseek/deepseek-v4.1-flash', 0.2)).toEqual({ temperature: 0.2 });
-    expect(amostragemDoModelo('anthropic/claude-haiku-5.5', 0.3)).toEqual({ temperature: 0.3 });
     expect(amostragemDoModelo('openai/gpt-5.4', 0.2)).toEqual({ temperature: 0.2 });
   });
 
   it('direto na OpenAI continua igual', () => {
     expect(amostragemDoModelo('gpt-6-luna', 0.2)).toEqual({ reasoning_effort: 'none' });
+  });
+});
+
+describe('amostragemDoModelo — Claude 5.x pelo OpenRouter', () => {
+  it('sem temperatura e com raciocínio baixo', () => {
+    expect(amostragemDoModelo('anthropic/claude-haiku-5.5', 0.3)).toEqual({ reasoning: { effort: 'low' } });
+    expect(amostragemDoModelo('anthropic/claude-sonnet-5.5', 0.2)).toEqual({ reasoning: { effort: 'low' } });
+  });
+
+  it('Claude antigo pelo OpenRouter segue com temperatura', () => {
+    expect(amostragemDoModelo('anthropic/claude-sonnet-4.6', 0.2)).toEqual({ temperature: 0.2 });
   });
 });
