@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { esquemaEstilo } from './esquema-estilo';
 import { config } from '../config';
 import { runOrchestrator } from '../agents/orchestrator';
 import { limparEventosDoProvedor } from '../agents/entrada';
@@ -27,7 +28,7 @@ const ChatRequestSchema = z.object({
   tenant_id:            z.string().optional(),
   executor_model:       z.string().optional(),
   cotacao_no_codigo:    z.boolean().optional(),
-  estilo:               z.object({ emoji: z.boolean().optional(), dividir: z.boolean().optional() }).optional(),
+  estilo:               esquemaEstilo.optional(),
 });
 
 // ── Auth middleware ────────────────────────────────────────────
