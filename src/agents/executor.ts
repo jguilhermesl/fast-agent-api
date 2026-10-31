@@ -23,6 +23,7 @@ import { escolherModeloExecutor, MODELO_EXECUTOR_PADRAO } from './modelo-executo
 import { textoFixoVizinho } from './texto-fixo-vizinho';
 import { intencoesEsquecidas, cobrancaDeTarefas } from './tarefas-esquecidas';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
+import { criarClienteOpenRouter, ehModeloOpenRouter, extrasOpenRouter, custoDoOpenRouter, somarCusto, mensagensParaOpenRouter } from '../services/openrouter';
 
 // O Executor NÃO usa o `model_name` do agente (esse é o do Orquestrador). O dele
 // vem de `prompt_config.executor_model`, com `gpt-5.4-mini` como padrão — ver
@@ -32,6 +33,9 @@ import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from '
 // limite era de rodadas, e 8 rodadas sem timeout não têm teto de tempo nenhum.
 const openai = new OpenAI({ apiKey: config.openaiApiKey, timeout: 60_000, maxRetries: 1 });
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey, timeout: 60_000, maxRetries: 1 });
+// Id `fornecedor/modelo` em `executor_model` roda pelo OpenRouter (31/10/2026). Sem a chave,
+// esses ids nem são aceitos (modelo-executor.ts) e o executor fica no padrão.
+const openrouter = criarClienteOpenRouter(config.openrouterApiKey, 60_000);
 
 const MAX_TOOL_ROUNDS = 8;
 
@@ -53,7 +57,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     getModeloExecutorDoAgente(input.agent_id),
     getExecutorConfereTarefas(input.agent_id),
   ]);
-  const modelo = escolherModeloExecutor({ doCorpo: input.model, doAgente: modeloDoAgente });
+  const modelo = escolherModeloExecutor({ doCorpo: input.model, doAgente: modeloDoAgente, aceitaOpenRouter: openrouter !== null });
 
   // `null` = erro de leitura no Supabase, distinto de "agente sem intents"
   // ([]). Aqui o fail-open é tratar como sem intents dinâmicas neste turno —
@@ -92,9 +96,12 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   let usedModel = 'gpt-4.1-mini';
   let rounds = 0;
   const toolsCalledLog: ToolCallLog[] = [];
+  // Custo que o OpenRouter devolve em cada rodada; null = sai da tarifa (outros provedores,
+  // ou alguma rodada sem `usage.cost`, ou o turno caiu no modelo padrão no meio).
+  let custoOpenRouter: number | null = ehModeloOpenRouter(modelo) ? 0 : null;
 
   const buildTrace = (finalResult: string): ExecutorResult => {
-    const cost_usd = calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens);
+    const cost_usd = custoOpenRouter ?? calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens);
     return {
       result: finalResult,
       trace: {
@@ -231,13 +238,37 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
       break;
     }
     rounds = round + 1;
-    const response = await openai.chat.completions.create({
-      model: modeloDaVez,
-      messages,
-      tools,
-      tool_choice: 'auto',
-      ...amostragemDoModelo(modeloDaVez, 0.3),
-    }, { timeout: capTimeout(60_000, input.deadline) });
+    const viaOpenRouter = openrouter !== null && ehModeloOpenRouter(modeloDaVez);
+    let response: OpenAI.Chat.ChatCompletion;
+    try {
+      response = await (viaOpenRouter && openrouter ? openrouter : openai).chat.completions.create({
+        model: modeloDaVez,
+        messages: viaOpenRouter ? mensagensParaOpenRouter(modeloDaVez, messages) : messages,
+        tools,
+        tool_choice: 'auto',
+        ...amostragemDoModelo(modeloDaVez, 0.3),
+        ...(viaOpenRouter ? extrasOpenRouter() : {}),
+      } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { timeout: capTimeout(60_000, input.deadline) });
+    } catch (err) {
+      // Modelo do OpenRouter falhou (fora do ar, nenhum fornecedor aceita data_collection
+      // deny, recusou ferramenta…). Igual ao caminho Claude: se nada foi executado ainda,
+      // o turno segue no padrão; se já executou, o erro sobe e nada é repetido.
+      if (!viaOpenRouter || toolsCalledLog.length) throw err;
+      const erro = err instanceof Error ? err.message : String(err);
+      await logError({
+        conversation_id: input.conversation_id,
+        agent_id: input.agent_id,
+        lead_id: input.lead_id,
+        error_message: `Executor ${modeloDaVez}: ${erro} | usando ${MODELO_EXECUTOR_PADRAO}`,
+        provider_failed: 'openrouter',
+        layer: 'executor-fallback',
+      });
+      modeloDaVez = MODELO_EXECUTOR_PADRAO;
+      custoOpenRouter = null;
+      round = -1;
+      continue;
+    }
+    if (viaOpenRouter) custoOpenRouter = somarCusto(custoOpenRouter, custoDoOpenRouter(response.usage));
 
     const msg = response.choices[0].message;
     totalCachedTokens += response.usage?.prompt_tokens_details?.cached_tokens ?? 0;
@@ -262,6 +293,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         tokensIn: totalInputTokens,
         tokensOut: totalOutputTokens,
         tokensCached: totalCachedTokens,
+        custoUsd: custoOpenRouter,
       }));
       return buildTrace(msg.content ?? '(sem resposta)');
     }
@@ -294,6 +326,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     tokensIn: totalInputTokens,
     tokensOut: totalOutputTokens,
     tokensCached: totalCachedTokens,
+    custoUsd: custoOpenRouter,
   }));
 
   await logError({

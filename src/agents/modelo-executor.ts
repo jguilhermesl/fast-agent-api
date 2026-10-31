@@ -19,6 +19,8 @@
  * Executor usa; os da família 5.6 e o gpt-6-luna recebem `reasoning_effort:
  * 'none'` em `modelo-params.ts`.
  */
+import { ehModeloOpenRouter } from '../services/openrouter';
+
 export const MODELO_EXECUTOR_PADRAO = 'gpt-5.4-mini';
 
 export const MODELOS_EXECUTOR_ACEITOS: readonly string[] = [
@@ -34,16 +36,24 @@ export const MODELOS_EXECUTOR_ACEITOS: readonly string[] = [
   'claude-sonnet-5-5',
 ];
 
-/** Aceita o nome exato ou com a data da versão (`gpt-6-luna-2026-09-22`). */
-export function modeloExecutorAceito(modelo: string): boolean {
+/**
+ * Aceita o nome exato ou com a data da versão (`gpt-6-luna-2026-09-22`).
+ *
+ * Com `aceitaOpenRouter` (o serviço tem `OPENROUTER_API_KEY`), aceita também qualquer id
+ * `fornecedor/modelo` do OpenRouter (31/10/2026): o catálogo muda toda semana e uma lista
+ * fixa aqui ficaria velha. Se o modelo não existir ou recusar ferramenta, o executor cai no
+ * padrão antes de executar qualquer coisa (executor.ts) e o erro vai para agent_error_logs.
+ */
+export function modeloExecutorAceito(modelo: string, aceitaOpenRouter = false): boolean {
+  if (aceitaOpenRouter && ehModeloOpenRouter(modelo)) return true;
   return MODELOS_EXECUTOR_ACEITOS.some(
     (base) => modelo === base || (modelo.startsWith(base + '-') && /^\d{4}-\d{2}-\d{2}$/.test(modelo.slice(base.length + 1)))
   );
 }
 
-export function escolherModeloExecutor(opcoes: { doCorpo?: unknown; doAgente?: unknown }): string {
+export function escolherModeloExecutor(opcoes: { doCorpo?: unknown; doAgente?: unknown; aceitaOpenRouter?: boolean }): string {
   for (const candidato of [opcoes.doCorpo, opcoes.doAgente]) {
-    if (typeof candidato === 'string' && modeloExecutorAceito(candidato.trim())) return candidato.trim();
+    if (typeof candidato === 'string' && modeloExecutorAceito(candidato.trim(), opcoes.aceitaOpenRouter)) return candidato.trim();
   }
   return MODELO_EXECUTOR_PADRAO;
 }

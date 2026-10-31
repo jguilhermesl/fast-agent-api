@@ -41,3 +41,22 @@ describe('modeloExecutorAceito', () => {
     expect(modeloExecutorAceito('gpt-5.4-pro')).toBe(false);
   });
 });
+
+describe('modelo do executor pelo OpenRouter (31/10/2026)', () => {
+  it('aceita id fornecedor/modelo só quando o serviço tem a chave', () => {
+    expect(escolherModeloExecutor({ doAgente: 'openai/gpt-6-luna', aceitaOpenRouter: true })).toBe('openai/gpt-6-luna');
+    expect(escolherModeloExecutor({ doAgente: 'deepseek/deepseek-v4.1-flash', aceitaOpenRouter: true })).toBe('deepseek/deepseek-v4.1-flash');
+    expect(escolherModeloExecutor({ doAgente: 'openai/gpt-6-luna' })).toBe('gpt-5.4-mini');
+    expect(escolherModeloExecutor({ doAgente: 'openai/gpt-6-luna', aceitaOpenRouter: false })).toBe('gpt-5.4-mini');
+  });
+
+  it('id torto não passa nem com a chave', () => {
+    expect(escolherModeloExecutor({ doAgente: 'openai/', aceitaOpenRouter: true })).toBe('gpt-5.4-mini');
+    expect(escolherModeloExecutor({ doAgente: 'a/b/c', aceitaOpenRouter: true })).toBe('gpt-5.4-mini');
+  });
+
+  it('a lista de sempre continua valendo com a chave ligada', () => {
+    expect(escolherModeloExecutor({ doAgente: 'claude-haiku-5-5', aceitaOpenRouter: true })).toBe('claude-haiku-5-5');
+    expect(modeloExecutorAceito('gpt-6-luna', true)).toBe(true);
+  });
+});

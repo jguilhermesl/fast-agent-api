@@ -38,3 +38,21 @@ describe('amostragemDoModelo', () => {
     expect(amostragemDoModelo('gpt-5.62-qualquer', 0.3)).toEqual({ temperature: 0.3 });
   });
 });
+
+describe('amostragemDoModelo — id do OpenRouter (31/10/2026)', () => {
+  it('família sem temperatura pelo OpenRouter manda reasoning no formato dele', () => {
+    expect(amostragemDoModelo('openai/gpt-6-luna', 0.2)).toEqual({ reasoning: { effort: 'none' } });
+    expect(amostragemDoModelo('openai/gpt-6.1-terra', 0.2)).toEqual({ reasoning: { effort: 'none' } });
+    expect(amostragemDoModelo('openai/gpt-5.6-luna', 0.2)).toEqual({ reasoning: { effort: 'none' } });
+  });
+
+  it('outros fornecedores seguem com temperatura', () => {
+    expect(amostragemDoModelo('deepseek/deepseek-v4.1-flash', 0.2)).toEqual({ temperature: 0.2 });
+    expect(amostragemDoModelo('anthropic/claude-haiku-5.5', 0.3)).toEqual({ temperature: 0.3 });
+    expect(amostragemDoModelo('openai/gpt-5.4', 0.2)).toEqual({ temperature: 0.2 });
+  });
+
+  it('direto na OpenAI continua igual', () => {
+    expect(amostragemDoModelo('gpt-6-luna', 0.2)).toEqual({ reasoning_effort: 'none' });
+  });
+});
