@@ -21,23 +21,40 @@ npm run test:smoke   # tsx scripts/smoke-http.ts
 
 Env obrigatória (só nomes, `src/config/index.ts`): `API_SECRET`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `WEBHOOK_SECRET`. Opcional: `REDIS_URL`,
-`ZAPI_CLIENT_TOKEN`, `GUARD_MODE`, `CRUZAMENTO_MODE`, `RAJADA_MODE`, `MONTADOR_SOMBRA`. Qual Supabase está no env do Railway: não verificado.
+`ZAPI_CLIENT_TOKEN`, `GUARD_MODE`, `CRUZAMENTO_MODE`, `RAJADA_MODE`, `MONTADOR_SOMBRA`, `OPENROUTER_API_KEY`.
+Qual Supabase está no env do Railway: não verificado.
 
-Estado das chaves no Railway (conferido em 30/09/2026):
+Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway):
 - `API_SECRET` é o placeholder `your-secret-key-here` e autentica `/api/chat` e `/api/send-external`. A troca
   foi adiada pelo dono; ver `../CLAUDE.md`.
-- `ANTHROPIC_API_KEY` dá 401. Agentes com modelo Claude (Priscila, Dani) caem em `gpt-4.1-mini` sem aviso.
+- `ANTHROPIC_API_KEY` funciona desde 16/10 (Duda em `claude-sonnet-5-5`); quando o crédito acaba, o orquestrador
+  cai no `gpt-5.4` e grava `agent_error_logs` camada `orchestrator-fallback`.
+- `OPENROUTER_API_KEY` configurada. `GOOGLE_API_KEY` existe no Railway: não usar (regra da Fast IA, nada de Google).
 - `OPENAI_API_KEY` tem de ser a mesma do secret do Supabase e do `.env.local`.
+- Token do Railway: `RAILWAY_TOKEN_FAST_AGENT_API` (de projeto, header `Project-Access-Token`).
+  `RAILWAY_TOKEN_FAST_IA_OFICIAL` e `RAILWAY_TOKEN` dão "Project Token not found" (31/10/2026).
 
-## Como um turno funciona hoje (30/09/2026)
+## Como um turno funciona hoje (31/10/2026)
 
 - **Orquestrador** (`src/agents/orchestrator.ts`): modelo = `prompt_config.model_name` do agente; rodada 0 com
   `tool_choice: required` (força o executor, exceto saudação), depois `auto`.
   - A rodada 2 não reaproveita o cache da rodada 1.
   - Teste pago de 30/09 (`../estudo-20260930/execucao-cache-e-credito.md`): nem `tool_choice` igual, nem
     `prompt_cache_key`, nem retenção de 24 h mudam o resultado (≤ US$ 2,6/mês). Não mexer por custo.
-- **Executor** (`src/agents/executor.ts`): `gpt-5.4-mini` fixo. Não vê o `system_prompt` do agente; vê as
-  ferramentas e as `trigger_description`.
+  - Falha do provedor principal (Anthropic ou OpenRouter) refaz o turno em `openai/gpt-5.4`
+    (`agents/fallback-openai.ts`, troca provedor E modelo desde 31/10).
+- **Executor** (`src/agents/executor.ts`): modelo de `prompt_config.executor_model` (lista em
+  `agents/modelo-executor.ts`, ou id do OpenRouter); padrão `gpt-5.4-mini`. Não vê o `system_prompt` do agente;
+  vê as ferramentas e as `trigger_description`. Modelo Claude ou do OpenRouter que falhar antes de executar
+  ferramenta cai no padrão e grava `agent_error_logs` camada `executor-fallback`.
+- **OpenRouter** (`src/services/openrouter.ts`, 31/10/2026): `model_provider: 'openrouter'` e `model_name` no
+  formato `fornecedor/modelo` (o n8n repassa os dois do `prompt_config`, sem mudança lá). Todo pedido leva
+  `provider.data_collection: 'deny'` (dado de paciente), `provider.ignore` com os hosts do Google e
+  `session_id` = conversa. O custo cobrado (`usage.cost`) vai para `llm_usage_logs.estimated_cost_usd`, com
+  `model_provider = 'openrouter'`. Claude 5.x pelo OpenRouter vai sem `temperature` e com `reasoning.effort:
+  low`; família gpt-6/5.6 com `reasoning.effort: none`. Claude pelo OpenRouter **não** usa o crédito da
+  Anthropic. Nenhum agente em produção usa OpenRouter ainda: o primeiro uso precisa de teste de fumaça pago
+  (uma chamada com ferramenta por modelo) e do agente de teste. Base: `../estudo-20261031-mercado/README.md`.
 - **Recusa × objeção** (`src/agents/objecao.ts`, `9cdc7d3`): "não quero", "não tenho interesse" e
   "não, obrigada" são recusa (acolhe, não insiste, porta aberta uma vez). "Tá caro" e "é longe" continuam
   objeção.
@@ -61,7 +78,8 @@ Estado das chaves no Railway (conferido em 30/09/2026):
 - **Estilo no código** (`src/agents/estilo-deterministico.ts`, 23/10/2026): `prompt_config.estilo:
   { "emoji": false, "dividir": true }` é aplicado no texto final, depois dos guards e da mídia e antes do Redis
   (o histórico fica igual ao que o cliente recebe). `emoji: false` tira emoji e arruma o espaço (mensagem só de
-  emoji some; se todas sumirem, vão as originais); `dividir: true` = parágrafo vira balão, teto de 4 por turno;
+  emoji some; se todas sumirem, vão as originais); `emoji: "raro"` (31/10/2026) faz o mesmo mas mantém 💳 💰 📄 📍
+  (informação do bloco de preço e documento); `dividir: true` = parágrafo vira balão, teto de 4 por turno;
   `dividir: false` = junta o texto seguido numa mensagem; com a chave presente (qualquer valor), `**negrito**`
   vira `*negrito*`. `[[midia:...]]` e URLs não são tocados e a ordem mídia/texto é mantida. **Sem a chave, nada
   muda.** O corpo do `/api/chat` aceita `estilo` (só a suíte manda). Log: `[Estilo]` e
