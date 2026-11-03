@@ -41,7 +41,7 @@ import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
-import { MODELO_FALLBACK_OPENAI, pedidoDoFallback } from './fallback-openai';
+import { pedidoDaReserva, modeloDaChamada } from './fallback-openai';
 import { criarClienteOpenRouter, extrasOpenRouter, custoDoOpenRouter, somarCusto, mensagensParaOpenRouter } from '../services/openrouter';
 import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
@@ -280,7 +280,8 @@ async function reescreverComInstrucao(
   deadline: Deadline,
   rotulo = 'Lastro',
 ): Promise<ReturnType<typeof parseOrchestratorOutput> | null> {
-  const modelo = provider === req.model_provider ? req.model_name : MODELO_FALLBACK_OPENAI;
+  const daChamada = modeloDaChamada(req, provider, Boolean(config.openrouterApiKey));
+  const modelo = daChamada.modelo;
   // Mesmo corte do runAnthropic, para reaproveitar o cache da persona; na OpenAI vai inteiro.
   const corte = provider === 'anthropic' ? separarSystemDoTurno(req.system_prompt) : { fixo: req.system_prompt, doTurno: '' };
   const system = corte.fixo + sufixoDeSaida(estilo) + instrucaoCotacao(req);
@@ -307,7 +308,7 @@ async function reescreverComInstrucao(
       tokensCached = uso.cache_read_input_tokens ?? 0;
       tokensOut = r.usage.output_tokens ?? 0;
     } else {
-      const provedorDaVez = modelo === req.model_name ? provider : 'openai';
+      const provedorDaVez = daChamada.provedor;
       const viaOpenRouter = provedorDaVez === 'openrouter';
       const mensagens: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: 'system', content: system }, ...conversa];
       const r = await clienteChat(provedorDaVez).chat.completions.create({
@@ -894,6 +895,8 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     }
 
     if (req.model_provider !== 'openai') {
+      // Reserva (fallback-openai.ts): Anthropic cai no mesmo Claude pelo OpenRouter (regra do dono, 03/11/2026).
+      const reserva = pedidoDaReserva(req, Boolean(config.openrouterApiKey));
       // A falha do provedor principal fica registrada MESMO quando o fallback
       // responde. Antes só gravava se os dois falhassem, e Priscila e Dani rodaram
       // semanas caladas em gpt-4.1-mini com a chave da Anthropic dando 401. Com o
@@ -903,16 +906,16 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         conversation_id: req.conversation_id,
         agent_id: req.agent_id,
         lead_id: req.lead_id,
-        error_message: `Primary ${req.model_provider}/${req.model_name}: ${errMsg} | usando fallback openai/${MODELO_FALLBACK_OPENAI}`,
+        error_message: `Primary ${req.model_provider}/${req.model_name}: ${errMsg} | usando fallback ${reserva.model_provider}/${reserva.model_name}`,
         provider_failed: req.model_provider,
         layer: 'orchestrator-fallback',
       });
       try {
-        console.log('[Orchestrator] Trying OpenAI fallback...');
-        providerUsed = 'openai';
+        console.log(`[Orchestrator] Trying fallback ${reserva.model_provider}/${reserva.model_name}...`);
+        providerUsed = reserva.model_provider;
         // gpt-5.4: o modelo em que os agentes foram validados. O gpt-4.1-mini de
         // antes respondia, mas pior, e ninguém percebia (ver logError acima).
-        result = await runOpenAI(pedidoDoFallback(req), history, deadline, nota, estilo);
+        result = await runOpenAI(reserva, history, deadline, nota, estilo);
       } catch (fallbackErr) {
         const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         await logError({
@@ -920,7 +923,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
           agent_id: req.agent_id,
           lead_id: req.lead_id,
           error_message: `Primary: ${errMsg} | Fallback: ${fallbackMsg}`,
-          provider_failed: `${req.model_provider}+openai`,
+          provider_failed: `${req.model_provider}+${reserva.model_provider}`,
           layer: 'orchestrator',
         });
         return makeFallback(history);

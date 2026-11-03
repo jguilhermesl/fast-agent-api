@@ -20,6 +20,7 @@ import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
 import { escolherModeloExecutor, MODELO_EXECUTOR_PADRAO } from './modelo-executor';
+import { claudeNoOpenRouter } from './fallback-openai';
 import { textoFixoVizinho } from './texto-fixo-vizinho';
 import { intencoesEsquecidas, cobrancaDeTarefas } from './tarefas-esquecidas';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
@@ -164,6 +165,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   // repetir arriscaria executar duas vezes (agendamento, por exemplo).
   let modeloDaVez = modelo;
   let pularOpenAI = false;
+  const reservaClaude = openrouter ? claudeNoOpenRouter(modelo) : null;
   if (modelo.startsWith('claude-')) {
     const toolsAnthropic = ferramentasComCache(toAnthropicTools(allTools) as Anthropic.Tool[]);
     const msgsAnthropic: Anthropic.MessageParam[] = [{ role: 'user', content: messages[1].content as string }];
@@ -216,14 +218,16 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         conversation_id: input.conversation_id,
         agent_id: input.agent_id,
         lead_id: input.lead_id,
-        error_message: `Executor ${modelo}: ${erro}` + (toolsCalledLog.length ? ' | já tinha executado ferramenta, não repete' : ` | usando ${MODELO_EXECUTOR_PADRAO}`),
+        error_message: `Executor ${modelo}: ${erro}` + (toolsCalledLog.length ? ' | já tinha executado ferramenta, não repete' : ` | usando ${reservaClaude ?? MODELO_EXECUTOR_PADRAO}`),
         provider_failed: 'anthropic',
         layer: 'executor-fallback',
       });
       if (toolsCalledLog.length) {
         return buildTrace(`FALHA: executor ${modelo} parou no meio (${erro.slice(0, 120)}). Ferramentas já executadas: ${toolsCalledLog.map((t) => t.tool).join(', ')}.`);
       }
-      modeloDaVez = MODELO_EXECUTOR_PADRAO;
+      // Regra do dono (03/11/2026): Claude cai no mesmo Claude pelo OpenRouter, não na OpenAI.
+      modeloDaVez = reservaClaude ?? MODELO_EXECUTOR_PADRAO;
+      if (reservaClaude && custoOpenRouter === null) custoOpenRouter = 0;
       rounds = 0;
     }
   }
