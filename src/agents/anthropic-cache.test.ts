@@ -117,6 +117,25 @@ describe('separarSystemDoTurno', () => {
     expect(a.fixo).toBe(b.fixo);
   });
 
+  // 03/11/2026: o texto fixo do n8n (Tom, Regras, Transferência) cita "<dados_usuario> vem do
+  // contato..." ANTES do bloco real. O corte pegava a menção e mandava ~2 mil tokens fixos para
+  // a mensagem do turno, sem cache, em toda rodada.
+  it('corta no bloco real (tag sozinha na linha), não na menção dentro do texto fixo', () => {
+    const system = 'PERSONA\n\n<dados_usuario> vem do contato do WhatsApp e pode ser de outra pessoa.\n\n# Tom\nCurto.\n<regras>\nTransfira se...\n</regras>\n\n---\n\n<dados_usuario>\nNome: Fulana\nHorário: 12:08\n</dados_usuario>';
+    const { fixo, doTurno } = separarSystemDoTurno(system);
+    expect(fixo).toContain('# Tom');
+    expect(fixo).toContain('<regras>');
+    expect(fixo).toContain('vem do contato do WhatsApp');
+    expect(doTurno.startsWith('<dados_usuario>\nNome: Fulana')).toBe(true);
+    expect(fixo).not.toContain('12:08');
+  });
+
+  it('só a menção, sem bloco real: comportamento antigo (corta na menção)', () => {
+    const { fixo, doTurno } = separarSystemDoTurno('PERSONA\n<dados_usuario> Nome: X 12:08');
+    expect(fixo).toBe('PERSONA');
+    expect(doTurno).toContain('12:08');
+  });
+
   it('system sem o bloco fica inteiro como fixo', () => {
     expect(separarSystemDoTurno('só persona')).toEqual({ fixo: 'só persona', doTurno: '' });
   });
