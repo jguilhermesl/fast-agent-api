@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
-import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, getExecutorConfereTarefas, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError } from '../services/supabase';
+import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, getExecutorConfereTarefas, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError, getKbOpcoes } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
 import {
   handleExecutarIntent,
@@ -21,6 +21,7 @@ import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
 import { escolherModeloExecutor, MODELO_EXECUTOR_PADRAO } from './modelo-executor';
 import { claudeNoOpenRouter } from './fallback-openai';
+import { semBuscaNaBase } from './kb-sem-busca';
 import { textoFixoVizinho } from './texto-fixo-vizinho';
 import { intencoesEsquecidas, cobrancaDeTarefas } from './tarefas-esquecidas';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
@@ -71,7 +72,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
 
   // Cria tools dinâmicas a partir das intents do banco
   const dynamicTools = createDynamicToolsFromIntents(intents);
-  const allTools = combineTools(EXECUTOR_TOOLS, dynamicTools);
+  const allTools = semBuscaNaBase(combineTools(EXECUTOR_TOOLS, dynamicTools), (await getKbOpcoes(input.agent_id)).semBusca === true);
   
   // Cria um Set com os nomes das intents para lookup rápido
   const intentSlugs = new Set(intents.map(intent => intent.slug));

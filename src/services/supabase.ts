@@ -578,6 +578,8 @@ export interface KbOpcoes {
   minSimilarity?: number;
   /** ids de treinamentos que já entram no prompt (injection_mode ≠ ondemand) */
   excluirIds?: Set<string>;
+  /** `prompt_config.kb.busca === false`: executor sem a ferramenta de busca (agents/kb-sem-busca.ts). */
+  semBusca?: boolean;
 }
 
 const KB_OPCOES_TTL_MS = 5 * 60_000;
@@ -589,7 +591,8 @@ export async function getKbOpcoes(agentId: string): Promise<KbOpcoes> {
   const opcoes: KbOpcoes = {};
   try {
     const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
-    const kb = (ag?.prompt_config as { kb?: { min_similarity?: unknown; excluir_injetados?: unknown } } | null)?.kb;
+    const kb = (ag?.prompt_config as { kb?: { min_similarity?: unknown; excluir_injetados?: unknown; busca?: unknown } } | null)?.kb;
+    if (kb?.busca === false) opcoes.semBusca = true;
     if (typeof kb?.min_similarity === 'number' && kb.min_similarity > 0 && kb.min_similarity < 1) {
       opcoes.minSimilarity = kb.min_similarity;
     }
