@@ -119,6 +119,7 @@ describe('cotação no código', () => {
     // texto depois do pix: o retorno entra junto do valor (e do "à vista"), não no fim da frase
     expect(um('Pix: {{pix:Psiquiatria (adulto)}} à vista 😊')).toBe('Pix: R$ 200 à vista (Sem direito a retorno) 😊');
     expect(um('Você paga {{pix:Clínico Geral}} no pix e leva hoje. Aproveite!')).toBe('Você paga R$ 75 (Com direito a retorno) no pix e leva hoje. Aproveite!');
+    expect(um('{{pix:Clínico Geral}} à vistaria')).toBe('R$ 75 (Com direito a retorno) à vistaria');
     // retorno de OUTRO item (no preco da mesma linha) não cala o do pix
     expect(um('Cartão {{preco:Psiquiatria (adulto)}} / Pix {{pix:Clínico Geral}}')).toBe(
       'Cartão R$210 - 3X SEM JUROS (Sem direito a retorno) / Pix R$ 75 (Com direito a retorno)',

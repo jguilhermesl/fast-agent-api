@@ -54,7 +54,7 @@ const RETORNO = /\((?:com|sem) direito a retorno[^)]*\)/i;
 /** Marca onde o valor do pix terminou (caractere que não aparece em texto de WhatsApp). */
 const PONTO_DO_RETORNO = '\u0000';
 /** O ponto e, se vier logo em seguida, o "à vista" do modelo: o retorno entra depois dele. */
-const DEPOIS_DO_PIX = /\u0000((?:\s*[àa] vista)?)/gi;
+const DEPOIS_DO_PIX = /\u0000((?:\s*[àa] vista(?!\p{L}))?)/giu;
 const MARCADOR = /\{\{\s*(preco|preço|valor|pix|datas)\s*:\s*([^}]+?)\s*\}\}/gi;
 /** Qualquer resto de marcador ({{, }}), bem formado ou não: a linha com ele nunca vai ao paciente. */
 export const RESTO_DE_MARCADOR = /\{\{|\}\}/;
