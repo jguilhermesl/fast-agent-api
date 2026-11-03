@@ -54,6 +54,30 @@ export function ferramentasComCache<T extends object>(ferramentas: T[]): T[] {
   return copia;
 }
 
+/**
+ * Fim marcado (como `mensagensComMarcadorNoFim`) e também o 1º bloco da mensagem do
+ * turno (`indiceDoTurno` = posição da mensagem do cliente). Medido em 03/11/2026: só com a
+ * marca no fim, a rodada 0 marcava o LEMBRETE_EXECUTOR, bloco que a rodada 1 não tem; o
+ * prefixo com a mensagem do turno era escrito a 1,25x e nunca lido. Com a marca no bloco
+ * do turno a rodada 1 lê o que a rodada 0 escreveu. Total de marcas: ferramentas, system,
+ * turno, fim = 4, o limite da API. Índice inválido ou bloco vazio: só o fim, como antes.
+ */
+export function mensagensComMarcadores(mensagens: Anthropic.MessageParam[], indiceDoTurno: number): Anthropic.MessageParam[] {
+  const comFim = mensagensComMarcadorNoFim(mensagens);
+  const alvo = comFim[indiceDoTurno];
+  if (!alvo || alvo.role !== 'user') return comFim;
+  const blocos: Array<Record<string, unknown>> =
+    typeof alvo.content === 'string'
+      ? [{ type: 'text', text: alvo.content }]
+      : alvo.content.map((b) => ({ ...(b as unknown as Record<string, unknown>) }));
+  const primeiro = blocos[0];
+  if (!primeiro || primeiro.type !== 'text' || !String(primeiro.text ?? '').trim()) return comFim;
+  blocos[0] = { ...primeiro, cache_control: EFEMERO };
+  const copia = comFim.slice();
+  copia[indiceDoTurno] = { ...alvo, content: blocos as unknown as Anthropic.MessageParam['content'] };
+  return copia;
+}
+
 export function mensagensComMarcadorNoFim(mensagens: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
   if (!mensagens.length) return mensagens;
   const ultima = mensagens[mensagens.length - 1];
