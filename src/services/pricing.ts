@@ -137,7 +137,8 @@ export function calcCostUsd(
   model: string,
   tokensIn: number,
   tokensOut: number,
-  tokensCached = 0
+  tokensCached = 0,
+  escritaCache = 0
 ): number {
   const tarifa = tarifaDe(model);
   const cacheados = Math.max(0, Math.min(tokensCached, tokensIn));
@@ -145,7 +146,7 @@ export function calcCostUsd(
   const precoCache = tarifa.cached ?? tarifa.input;
 
   const usd =
-    (cheios * tarifa.input + cacheados * precoCache + tokensOut * tarifa.output) / 1_000_000;
+    (cheios * tarifa.input + cacheados * precoCache + tokensOut * tarifa.output + Math.max(0, escritaCache) * tarifa.input) / 1_000_000;
 
   return parseFloat(usd.toFixed(8));
 }
@@ -166,6 +167,23 @@ export function calcCostUsd(
  */
 export const CURRENT_PRICING_VERSION = 2;
 
+/**
+ * Sobretaxa da escrita no cache da Anthropic, em tokens de entrada equivalentes, para somar
+ * ao custo (03/11/2026). A escrita custa 1,25x (TTL 5 min) ou 2x (TTL 1 h) e o `tokensIn` já
+ * cobra 1x: sobra 0,25x e 1x. Sem o detalhe `cache_creation`, vale 5 min.
+ */
+export function sobretaxaDeEscrita(uso: unknown): number {
+  const u = (uso ?? {}) as {
+    cache_creation_input_tokens?: number;
+    cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
+  };
+  const c = u.cache_creation;
+  if (c && (typeof c.ephemeral_5m_input_tokens === 'number' || typeof c.ephemeral_1h_input_tokens === 'number')) {
+    return (c.ephemeral_5m_input_tokens ?? 0) * 0.25 + (c.ephemeral_1h_input_tokens ?? 0);
+  }
+  return (u.cache_creation_input_tokens ?? 0) * 0.25;
+}
+
 export interface TokenLogParams {
   agent_id: string;
   conversation_id: string;
@@ -180,6 +198,8 @@ export interface TokenLogParams {
    * tarifa: com centenas de modelos, a tabela acima nunca vai ter todos. `null`/ausente = tarifa.
    */
   custoUsd?: number | null;
+  /** Sobretaxa da escrita no cache da Anthropic (`sobretaxaDeEscrita`), em tokens de entrada. */
+  escritaCache?: number;
 }
 
 /**
@@ -207,7 +227,7 @@ export function buildTokenLogEntry(params: TokenLogParams): TokenLogEntry {
     estimated_cost_usd:
       typeof params.custoUsd === 'number' && Number.isFinite(params.custoUsd) && params.custoUsd >= 0
         ? parseFloat(params.custoUsd.toFixed(8))
-        : calcCostUsd(params.model, params.tokensIn, params.tokensOut, tokensCached),
+        : calcCostUsd(params.model, params.tokensIn, params.tokensOut, tokensCached, params.escritaCache ?? 0),
     cached_input_tokens: tokensCached,
     pricing_version: CURRENT_PRICING_VERSION,
   };
