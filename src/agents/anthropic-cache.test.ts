@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
-import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim } from './anthropic-cache';
+import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensagensComMarcadores } from './anthropic-cache';
+import { comLembrete } from './anthropic-executor-obrigatorio';
 
 const marca = { type: 'ephemeral' };
 
@@ -52,6 +53,51 @@ describe('cache de prompt da Anthropic', () => {
 });
 
 import { separarSystemDoTurno } from './anthropic-cache';
+
+// 03/11/2026: a marca ficava só no fim. Na rodada 0 o fim é o LEMBRETE_EXECUTOR, que a
+// rodada 1 não tem: o prefixo com a mensagem do turno nunca era lido do cache (78% das
+// linhas de custo da Duda com `cached` = múltiplo exato do prefixo fixo).
+describe('mensagensComMarcadores: marca também a mensagem do turno', () => {
+  const hist: Anthropic.MessageParam[] = [
+    { role: 'user', content: 'oi' },
+    { role: 'assistant', content: 'Olá!' },
+  ];
+  const turno: Anthropic.MessageParam = { role: 'user', content: 'quanto custa o hemograma?' };
+
+  it('rodada 0 com lembrete: marca o 1º bloco da mensagem do turno e o lembrete', () => {
+    const r0 = mensagensComMarcadores(comLembrete([...hist, turno], 'LEMBRETE'), 2);
+    expect(r0[2].content).toEqual([
+      { type: 'text', text: 'quanto custa o hemograma?', cache_control: marca },
+      { type: 'text', text: 'LEMBRETE', cache_control: marca },
+    ]);
+    expect(r0.slice(0, 2)).toEqual(hist);
+  });
+
+  it('rodada 1: o bloco do turno sai igual ao da rodada 0 (mesmo prefixo) e o fim é marcado', () => {
+    const r1 = mensagensComMarcadores([
+      ...hist, turno,
+      { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'executor', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'R$ 15' }, { type: 'text', text: 'RESPONDA' }] },
+    ] as Anthropic.MessageParam[], 2);
+    expect(r1[2].content).toEqual([{ type: 'text', text: 'quanto custa o hemograma?', cache_control: marca }]);
+    const fim = r1[4].content as unknown as Array<Record<string, unknown>>;
+    expect(fim[1]).toEqual({ type: 'text', text: 'RESPONDA', cache_control: marca });
+    expect(fim[0].cache_control).toBeUndefined();
+  });
+
+  it('turno é a última mensagem e sem lembrete: uma marca só (limite de 4 da API)', () => {
+    const r = mensagensComMarcadores([...hist, turno], 2);
+    expect(r[2].content).toEqual([{ type: 'text', text: 'quanto custa o hemograma?', cache_control: marca }]);
+    const marcas = JSON.stringify(r).split('cache_control').length - 1;
+    expect(marcas).toBe(1);
+  });
+
+  it('índice fora do array ou texto vazio: cai no comportamento antigo (só o fim)', () => {
+    expect(mensagensComMarcadores([...hist, turno], 9)).toEqual(mensagensComMarcadorNoFim([...hist, turno]));
+    const vazio: Anthropic.MessageParam[] = [...hist, { role: 'user', content: '  ' }];
+    expect(mensagensComMarcadores(vazio, 2)).toEqual(mensagensComMarcadorNoFim(vazio));
+  });
+});
 
 describe('separarSystemDoTurno', () => {
   it('persona fica fixa; dados do cliente, horário e CRM vão para o turno', () => {

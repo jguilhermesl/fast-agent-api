@@ -46,7 +46,7 @@ import { criarClienteOpenRouter, extrasOpenRouter, custoDoOpenRouter, somarCusto
 import { isGreetingOrFarewell } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
-import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, separarSystemDoTurno } from './anthropic-cache';
+import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensagensComMarcadores, separarSystemDoTurno } from './anthropic-cache';
 import {
   tarefasEscritasComoTexto,
   comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME,
@@ -481,7 +481,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       // 8192: os modelos 5.x podem raciocinar antes de responder, e isso conta aqui.
       max_tokens: 8192,
       system: systemComCache(systemFixo + sufixoDeSaida(estilo) + instrucaoCotacao(req)),
-      messages: mensagensComMarcadorNoFim(texto ? comLembrete(messages, texto) : messages),
+      messages: mensagensComMarcadores(texto ? comLembrete(messages, texto) : messages, history.length),
       tools: ferramentasComCache(tools as Anthropic.Tool[]),
       tool_choice: comForca ? { type: 'any' } : { type: 'auto' },
     }, { timeout: capTimeout(LLM_TIMEOUT_MS, deadline) });
