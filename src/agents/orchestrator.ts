@@ -44,7 +44,7 @@ import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, hist
 import { amostragemDoModelo } from './modelo-params';
 import { pedidoDaReserva, modeloDaChamada } from './fallback-openai';
 import { criarClienteOpenRouter, extrasOpenRouter, custoDoOpenRouter, somarCusto, mensagensParaOpenRouter } from '../services/openrouter';
-import { isGreetingOrFarewell } from './saudacao';
+import { isGreetingOrFarewell, dispensaExecutor } from './saudacao';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensagensComMarcadores, separarSystemDoTurno } from './anthropic-cache';
@@ -351,7 +351,7 @@ async function reescreverComInstrucao(
 async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false, estilo: string | null = null): Promise<ProviderResult> {
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
-  const forceExecutor = !isGreetingOrFarewell(req.client_messages);
+  const forceExecutor = !dispensaExecutor(req.client_messages);
   const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -443,7 +443,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
 async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: Deadline, nota = false, estilo: string | null = null): Promise<ProviderResult> {
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
-  const forceExecutor = !isGreetingOrFarewell(req.client_messages);
+  const forceExecutor = !dispensaExecutor(req.client_messages);
   // Persona fixa no system (cache entre conversas); dados do cliente, horário e CRM
   // vão com a mensagem deste turno (agents/anthropic-cache.ts `separarSystemDoTurno`).
   const { fixo: systemFixo, doTurno } = separarSystemDoTurno(req.system_prompt);
