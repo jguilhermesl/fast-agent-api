@@ -46,7 +46,11 @@ const EFEMERO_1H = { type: 'ephemeral', ttl: '1h' } as const;
 export const INICIO_DO_TRECHO_DO_TURNO = '<dados_usuario>';
 
 export function separarSystemDoTurno(system: string): { fixo: string; doTurno: string } {
-  const i = system.indexOf(INICIO_DO_TRECHO_DO_TURNO);
+  // O bloco real é a tag sozinha na linha. O texto fixo do n8n cita "<dados_usuario> vem do
+  // contato..." antes dele; cortar ali mandava ~2 mil tokens fixos para o turno, sem cache
+  // (03/11/2026). Sem bloco real, vale a primeira ocorrência, como antes.
+  const real = /(^|\n)<dados_usuario>[ \t]*\r?\n/.exec(system);
+  const i = real ? real.index + real[1].length : system.indexOf(INICIO_DO_TRECHO_DO_TURNO);
   if (i <= 0) return { fixo: system, doTurno: '' };
   return { fixo: system.slice(0, i).trimEnd(), doTurno: system.slice(i).trim() };
 }
