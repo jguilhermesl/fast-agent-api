@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calcCostUsd, inferModelProvider, tarifaDe, buildTokenLogEntry, CURRENT_PRICING_VERSION } from './pricing';
+import { calcCostUsd, inferModelProvider, tarifaDe, buildTokenLogEntry, CURRENT_PRICING_VERSION, sobretaxaDeEscrita } from './pricing';
 
 /**
  * Fonte de verdade dos números esperados: a tabela `llm_pricing` do Supabase
@@ -209,5 +209,29 @@ describe('OpenRouter (31/10/2026)', () => {
     expect(buildTokenLogEntry({ ...base, custoUsd: null }).estimated_cost_usd).toBe(2.5);
     expect(buildTokenLogEntry({ ...base, custoUsd: -1 }).estimated_cost_usd).toBe(2.5);
     expect(buildTokenLogEntry({ ...base, custoUsd: Number.NaN }).estimated_cost_usd).toBe(2.5);
+  });
+});
+
+// 03/11/2026: a escrita no cache da Anthropic custa 1,25x (5 min) ou 2x (1 h) e era gravada
+// a preço de entrada comum; o painel subestimava a Duda em ~17%.
+describe('sobretaxa de escrita no cache (Anthropic)', () => {
+  it('lê 5 min e 1 h do cache_creation', () => {
+    expect(sobretaxaDeEscrita({ cache_creation_input_tokens: 3000, cache_creation: { ephemeral_5m_input_tokens: 1000, ephemeral_1h_input_tokens: 2000 } })).toBe(1000 * 0.25 + 2000);
+  });
+  it('sem o detalhe, trata a escrita como 5 min', () => {
+    expect(sobretaxaDeEscrita({ cache_creation_input_tokens: 4000 })).toBe(1000);
+  });
+  it('sem escrita, zero', () => {
+    expect(sobretaxaDeEscrita({})).toBe(0);
+    expect(sobretaxaDeEscrita(undefined)).toBe(0);
+  });
+  it('custo soma a sobretaxa à tarifa de entrada (Sonnet 5.5: US$ 2/M)', () => {
+    const sem = calcCostUsd('claude-sonnet-5-5', 10_000, 0, 0);
+    const com = calcCostUsd('claude-sonnet-5-5', 10_000, 0, 0, 10_000 * 0.25);
+    expect(com - sem).toBeCloseTo(10_000 * 0.25 * 2 / 1_000_000, 8);
+  });
+  it('buildTokenLogEntry repassa a sobretaxa', () => {
+    const e = buildTokenLogEntry({ agent_id: 'a', conversation_id: 'c', lead_id: 'l', model: 'claude-sonnet-5-5', tokensIn: 10_000, tokensOut: 0, escritaCache: 2_500 });
+    expect(e.estimated_cost_usd).toBeCloseTo(calcCostUsd('claude-sonnet-5-5', 10_000, 0, 0, 2_500), 8);
   });
 });

@@ -10,6 +10,7 @@ import { equipeFalouDepoisDoCliente, JANELA_TURNO_MS, turnoComecaComAtendente } 
 import {
   saveTokenUsage,
   buildTokenLogEntry,
+  sobretaxaDeEscrita,
   logError,
   getAgentIntents,
   getIntentLogsCompletos,
@@ -189,6 +190,8 @@ interface ProviderResult {
   tokensCached: number;
   /** Custo cobrado, quando o provedor devolve (OpenRouter). Ausente/null = tarifa. */
   custoUsd?: number | null;
+  /** Sobretaxa da escrita no cache da Anthropic (services/pricing.ts `sobretaxaDeEscrita`). */
+  escritaCache?: number;
   model: string;
   rounds: number;
   executorTrace: ExecutorTrace;
@@ -292,7 +295,7 @@ async function reescreverComInstrucao(
     { role: 'user' as const, content: instrucao },
   ];
   try {
-    let texto = '', tokensIn = 0, tokensOut = 0, tokensCached = 0, modeloUsado = modelo;
+    let texto = '', tokensIn = 0, tokensOut = 0, tokensCached = 0, escritaCache = 0, modeloUsado = modelo;
     let custoUsd: number | null = null;
     if (provider === 'anthropic') {
       const r = await anthropic.messages.create({
@@ -306,6 +309,7 @@ async function reescreverComInstrucao(
       const uso = r.usage as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
       tokensIn = (r.usage.input_tokens ?? 0) + (uso.cache_read_input_tokens ?? 0) + (uso.cache_creation_input_tokens ?? 0);
       tokensCached = uso.cache_read_input_tokens ?? 0;
+      escritaCache = sobretaxaDeEscrita(r.usage);
       tokensOut = r.usage.output_tokens ?? 0;
     } else {
       const provedorDaVez = daChamada.provedor;
@@ -333,6 +337,7 @@ async function reescreverComInstrucao(
       tokensOut,
       tokensCached,
       custoUsd,
+      escritaCache,
     }));
     if (!texto.trim()) return null;
     return parseOrchestratorOutput(texto, entregouAoCliente(result.executorTrace.tools_called));
@@ -456,7 +461,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     { role: 'user', content: formattedMessage },
   ];
 
-  let totalIn = 0, totalOut = 0, totalCached = 0, rounds = 0;
+  let totalIn = 0, totalOut = 0, totalCached = 0, totalEscrita = 0, rounds = 0;
   const usedModel = req.model_name;
   const allExecutorTraces: ExecutorTrace[] = [];
   const communications: Array<{ query: string; result: string }> = [];
@@ -507,6 +512,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     const anthropicCached = uso.cache_read_input_tokens ?? 0;
     totalIn     += anthropicCached + (uso.cache_creation_input_tokens ?? 0);
     totalCached += anthropicCached;
+    totalEscrita += sobretaxaDeEscrita(response.usage);
 
     // Rodada 0 obrigatória que terminou sem executor (só acontece no caminho `auto`):
     // descarta a resposta e repete uma vez com o lembrete firme. Se insistir, segue.
@@ -540,6 +546,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
         tokensIn: totalIn,
         tokensOut: totalOut,
         tokensCached: totalCached,
+        escritaCache: totalEscrita,
         model: usedModel,
         rounds,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
@@ -606,6 +613,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     totalIn += final.usage.input_tokens + (usoFinal.cache_read_input_tokens ?? 0) + (usoFinal.cache_creation_input_tokens ?? 0);
     totalOut += final.usage.output_tokens;
     totalCached += usoFinal.cache_read_input_tokens ?? 0;
+    totalEscrita += sobretaxaDeEscrita(final.usage);
     const texto = final.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('');
     if (texto.trim()) {
       console.warn(`[Orchestrator] ${usedModel} esgotou as rodadas: resposta final sem ferramentas`);
@@ -614,6 +622,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
         tokensIn: totalIn,
         tokensOut: totalOut,
         tokensCached: totalCached,
+        escritaCache: totalEscrita,
         model: usedModel,
         rounds: rounds + 1,
         executorTrace: mergeExecutorTraces(allExecutorTraces),
@@ -955,6 +964,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     tokensOut: result.tokensOut,
     tokensCached: result.tokensCached,
     custoUsd: result.custoUsd,
+    escritaCache: result.escritaCache,
   });
   const costUsd = tokenEntry.estimated_cost_usd;
   await saveTokenUsage(tokenEntry);

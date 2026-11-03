@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
-import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, getExecutorConfereTarefas, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError, getKbOpcoes } from '../services/supabase';
+import { getAgentIntents, getIntentLogs, getModeloExecutorDoAgente, getExecutorConfereTarefas, saveTokenUsage, calcCostUsd, buildTokenLogEntry, logError, getKbOpcoes, sobretaxaDeEscrita } from '../services/supabase';
 import { capTimeout } from '../services/deadline';
 import {
   handleExecutarIntent,
@@ -95,6 +95,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalCachedTokens = 0;
+  let totalEscrita = 0;
   let usedModel = 'gpt-4.1-mini';
   let rounds = 0;
   const toolsCalledLog: ToolCallLog[] = [];
@@ -103,7 +104,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
   let custoOpenRouter: number | null = ehModeloOpenRouter(modelo) ? 0 : null;
 
   const buildTrace = (finalResult: string): ExecutorResult => {
-    const cost_usd = custoOpenRouter ?? calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens);
+    const cost_usd = custoOpenRouter ?? calcCostUsd(usedModel, totalInputTokens, totalOutputTokens, totalCachedTokens, totalEscrita);
     return {
       result: finalResult,
       trace: {
@@ -185,6 +186,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         const uso = response.usage as { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
         totalInputTokens  += uso.input_tokens + (uso.cache_read_input_tokens ?? 0) + (uso.cache_creation_input_tokens ?? 0);
         totalCachedTokens += uso.cache_read_input_tokens ?? 0;
+        totalEscrita += sobretaxaDeEscrita(uso);
         totalOutputTokens += uso.output_tokens;
         usedModel = modelo;
 
@@ -197,7 +199,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
           }
           await saveTokenUsage(buildTokenLogEntry({
             agent_id: input.agent_id, conversation_id: input.conversation_id, lead_id: input.lead_id,
-            model: usedModel, tokensIn: totalInputTokens, tokensOut: totalOutputTokens, tokensCached: totalCachedTokens,
+            model: usedModel, tokensIn: totalInputTokens, tokensOut: totalOutputTokens, tokensCached: totalCachedTokens, escritaCache: totalEscrita,
           }));
           const texto = response.content.filter((b) => b.type === 'text').map((b) => (b.type === 'text' ? b.text : '')).join('\n');
           return buildTrace(texto || '(sem resposta)');
@@ -297,7 +299,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
         model: usedModel,
         tokensIn: totalInputTokens,
         tokensOut: totalOutputTokens,
-        tokensCached: totalCachedTokens,
+        tokensCached: totalCachedTokens, escritaCache: totalEscrita,
         custoUsd: custoOpenRouter,
       }));
       return buildTrace(msg.content ?? '(sem resposta)');
@@ -330,7 +332,7 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
     model: usedModel,
     tokensIn: totalInputTokens,
     tokensOut: totalOutputTokens,
-    tokensCached: totalCachedTokens,
+    tokensCached: totalCachedTokens, escritaCache: totalEscrita,
     custoUsd: custoOpenRouter,
   }));
 
