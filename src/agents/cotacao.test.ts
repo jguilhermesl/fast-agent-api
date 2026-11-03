@@ -85,9 +85,26 @@ describe('cotação no código', () => {
     expect(r.naoResolvidos).toEqual([]);
     expect(r.resolvidos).toBe(3);
     expect(r.mensagens[0]).toBe(
-      'Clínico Geral\n\n• Valor: R$85 - 3X SEM JUROS (Com direito a retorno)\n💰 DINHEIRO/PIX: R$ 75 À VISTA\n\nDatas disponíveis:\nDr. Edson José\n• Sábado, 17/10 às 07h (ordem de chegada)\nDra. Rayanne Miranda\n• Terça-feira, 20/10 das 09h às 11h (ordem de chegada)',
+      'Clínico Geral\n\n• Valor: R$85 - 3X SEM JUROS (Com direito a retorno)\n💰 DINHEIRO/PIX: R$ 75 À VISTA (Com direito a retorno)\n\nDatas disponíveis:\nDr. Edson José\n• Sábado, 17/10 às 07h (ordem de chegada)\nDra. Rayanne Miranda\n• Terça-feira, 20/10 das 09h às 11h (ordem de chegada)',
     );
     expect(r.mensagens[1]).toBe('Qual fica melhor pra você? 😊');
+  });
+
+  // LP 03/11/2026: "O atendimento tem direito a retorno independente da forma de pagamento".
+  // A planilha só escreve o retorno no valor do cartão; a paciente entendia que o à vista não tinha.
+  it('retorno escrito no valor do cartão vale também na linha do pix', () => {
+    const psiq = catalogoDoTurno([{ tool: 'conferir_especialidades', result: [
+      { nome: 'Psiquiatria (adulto)', preco: 'R$210 - 3X SEM JUROS (Sem direito a retorno)', precoPix: 'R$ 200', disponibilidades: [] },
+      { nome: 'Exame X', preco: 'R$ 40', precoPix: 'R$ 38', disponibilidades: [] },
+    ] }]);
+    const sem = resolverMarcadores(['💳 CARTÃO: {{preco:Psiquiatria (adulto)}}\n💰 DINHEIRO/PIX: {{pix:Psiquiatria (adulto)}} À VISTA'], psiq);
+    expect(sem.mensagens[0]).toBe('💳 CARTÃO: R$210 - 3X SEM JUROS (Sem direito a retorno)\n💰 DINHEIRO/PIX: R$ 200 À VISTA (Sem direito a retorno)');
+    // o modelo já escreveu o retorno na linha: não duplica
+    const ja = resolverMarcadores(['💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA (com direito a retorno)'], cat);
+    expect(ja.mensagens[0]).toBe('💰 DINHEIRO/PIX: R$ 75 À VISTA (com direito a retorno)');
+    // preço sem retorno: a linha do pix fica como está
+    const nada = resolverMarcadores(['💰 DINHEIRO/PIX: {{pix:Exame X}} À VISTA'], psiq);
+    expect(nada.mensagens[0]).toBe('💰 DINHEIRO/PIX: R$ 38 À VISTA');
   });
 
   it('pix inexistente apaga a linha inteira', () => {

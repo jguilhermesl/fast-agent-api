@@ -50,6 +50,7 @@ Valor que você calcula (soma de dois itens, total com desconto) ou que está es
 Exemplo:
 "Clínico Geral\\n\\n• Valor: {{preco:Clínico Geral}}\\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA\\n\\nDatas disponíveis:\\n{{datas:Clínico Geral}}"`;
 
+const RETORNO = /\((?:com|sem) direito a retorno[^)]*\)/i;
 const MARCADOR = /\{\{\s*(preco|preço|valor|pix|datas)\s*:\s*([^}]+?)\s*\}\}/gi;
 /** Qualquer resto de marcador ({{, }}), bem formado ou não: a linha com ele nunca vai ao paciente. */
 export const RESTO_DE_MARCADOR = /\{\{|\}\}/;
@@ -250,6 +251,7 @@ export function resolverMarcadores(
       .split('\n')
       .map((linha) => {
         let some = false;
+        let retornoDoPix: string | null = null;
         const nova = linha.replace(MARCADOR, (bruto, tipoBruto: string, nomeBruto: string) => {
           // {{datas:ITEM|PROFISSIONAL}}: só as datas daquele profissional.
           const [nome, so] = nomeBruto.split('|').map((x) => x.trim());
@@ -265,12 +267,17 @@ export function resolverMarcadores(
           if (tipo === 'pix') {
             if (!item.precoPix) { some = true; return ''; }
             resolvidos++;
+            // LP 03/11/2026: o retorno vale para o atendimento, não para a forma de pagamento.
+            // A planilha só o escreve no valor do cartão; repete no fim da linha do pix.
+            retornoDoPix = RETORNO.exec(item.preco ?? '')?.[0] ?? null;
             return item.precoPix;
           }
           resolvidos++;
           return blocoDeDatas(item, titulos, tipo === 'datas' && so ? so : undefined);
         });
-        return some ? null : nova;
+        if (some) return null;
+        if (retornoDoPix && !/direito a retorno/i.test(nova)) return `${nova.trimEnd()} ${retornoDoPix}`;
+        return nova;
       })
       .filter((l): l is string => l !== null)
       .join('\n')
