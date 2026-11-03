@@ -51,6 +51,10 @@ Exemplo:
 "Clínico Geral\\n\\n• Valor: {{preco:Clínico Geral}}\\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA\\n\\nDatas disponíveis:\\n{{datas:Clínico Geral}}"`;
 
 const RETORNO = /\((?:com|sem) direito a retorno[^)]*\)/i;
+/** Marca onde o valor do pix terminou (caractere que não aparece em texto de WhatsApp). */
+const PONTO_DO_RETORNO = '\u0000';
+/** O ponto e, se vier logo em seguida, o "à vista" do modelo: o retorno entra depois dele. */
+const DEPOIS_DO_PIX = /\u0000((?:\s*[àa] vista(?!\p{L}))?)/giu;
 const MARCADOR = /\{\{\s*(preco|preço|valor|pix|datas)\s*:\s*([^}]+?)\s*\}\}/gi;
 /** Qualquer resto de marcador ({{, }}), bem formado ou não: a linha com ele nunca vai ao paciente. */
 export const RESTO_DE_MARCADOR = /\{\{|\}\}/;
@@ -252,6 +256,7 @@ export function resolverMarcadores(
       .map((linha) => {
         let some = false;
         let retornoDoPix: string | null = null;
+        let pixNaLinha = 0;
         const nova = linha.replace(MARCADOR, (bruto, tipoBruto: string, nomeBruto: string) => {
           // {{datas:ITEM|PROFISSIONAL}}: só as datas daquele profissional.
           const [nome, so] = nomeBruto.split('|').map((x) => x.trim());
@@ -268,16 +273,20 @@ export function resolverMarcadores(
             if (!item.precoPix) { some = true; return ''; }
             resolvidos++;
             // LP 03/11/2026: o retorno vale para o atendimento, não para a forma de pagamento.
-            // A planilha só o escreve no valor do cartão; repete no fim da linha do pix.
+            // A planilha só o escreve no valor do cartão; repete junto do valor do pix.
+            pixNaLinha++;
             retornoDoPix = RETORNO.exec(item.preco ?? '')?.[0] ?? null;
-            return item.precoPix;
+            return item.precoPix + PONTO_DO_RETORNO;
           }
           resolvidos++;
           return blocoDeDatas(item, titulos, tipo === 'datas' && so ? so : undefined);
         });
         if (some) return null;
-        if (retornoDoPix && !/direito a retorno/i.test(nova)) return `${nova.trimEnd()} ${retornoDoPix}`;
-        return nova;
+        // Só com um pix na linha (com dois, o retorno de um iria para o outro) e só se o modelo
+        // não escreveu o retorno ele mesmo: olha o texto dele, sem o que os marcadores trouxeram.
+        const modeloJaEscreveu = /direito a retorno/i.test(linha.replace(MARCADOR, ''));
+        const anexa = retornoDoPix !== null && pixNaLinha === 1 && !modeloJaEscreveu;
+        return nova.replace(DEPOIS_DO_PIX, (_m, aVista: string) => (anexa ? `${aVista} ${retornoDoPix}` : aVista));
       })
       .filter((l): l is string => l !== null)
       .join('\n')

@@ -107,6 +107,25 @@ describe('cotação no código', () => {
     expect(nada.mensagens[0]).toBe('💰 DINHEIRO/PIX: R$ 38 À VISTA');
   });
 
+  // Revisão do PR #32 (03/11/2026): bordas com mais de um item na linha e texto depois do pix.
+  it('retorno do pix: bordas da revisão', () => {
+    const c = catalogoDoTurno([{ tool: 'conferir_especialidades', result: [
+      { nome: 'Psiquiatria (adulto)', preco: 'R$210 - 3X SEM JUROS (Sem direito a retorno)', precoPix: 'R$ 200', disponibilidades: [] },
+      { nome: 'Clínico Geral', preco: 'R$85 - 3X SEM JUROS (Com direito a retorno)', precoPix: 'R$ 75', disponibilidades: [] },
+    ] }]);
+    const um = (l: string) => resolverMarcadores([l], c).mensagens[0];
+    // dois pix na mesma linha: não atribui o retorno de um ao outro
+    expect(um('Pix: {{pix:Clínico Geral}} ou {{pix:Psiquiatria (adulto)}}')).toBe('Pix: R$ 75 ou R$ 200');
+    // texto depois do pix: o retorno entra junto do valor (e do "à vista"), não no fim da frase
+    expect(um('Pix: {{pix:Psiquiatria (adulto)}} à vista 😊')).toBe('Pix: R$ 200 à vista (Sem direito a retorno) 😊');
+    expect(um('Você paga {{pix:Clínico Geral}} no pix e leva hoje. Aproveite!')).toBe('Você paga R$ 75 (Com direito a retorno) no pix e leva hoje. Aproveite!');
+    expect(um('{{pix:Clínico Geral}} à vistaria')).toBe('R$ 75 (Com direito a retorno) à vistaria');
+    // retorno de OUTRO item (no preco da mesma linha) não cala o do pix
+    expect(um('Cartão {{preco:Psiquiatria (adulto)}} / Pix {{pix:Clínico Geral}}')).toBe(
+      'Cartão R$210 - 3X SEM JUROS (Sem direito a retorno) / Pix R$ 75 (Com direito a retorno)',
+    );
+  });
+
   it('pix inexistente apaga a linha inteira', () => {
     const r = resolverMarcadores(['• Valor: {{preco:USG Abdome Total}}\n💰 Pix: {{pix:USG Abdome Total}} à vista\nNão exige requisição.'], cat);
     expect(r.mensagens[0]).toBe('• Valor: R$135,00 em até 2x sem juros\nNão exige requisição.');
