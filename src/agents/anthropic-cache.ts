@@ -20,6 +20,14 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 const EFEMERO = { type: 'ephemeral' } as const;
+/**
+ * 1 h para o que não muda entre turnos (ferramentas e system). Medido em 03/11/2026: 86%
+ * das chamadas grandes da Duda eram o prefixo fixo (~25 mil tokens) frio depois de 5 min
+ * sem turno, reescrito a 1,25x. Escrita de 1 h custa 2x, leitura igual (0,1x). A API exige
+ * as marcas de 1 h antes das de 5 min: ferramentas e system vêm antes das mensagens.
+ * Conferido com chamada real (sem header beta): `cache_creation.ephemeral_1h_input_tokens`.
+ */
+const EFEMERO_1H = { type: 'ephemeral', ttl: '1h' } as const;
 
 /**
  * Separa o system que o n8n monta em parte fixa e parte do turno.
@@ -44,13 +52,13 @@ export function separarSystemDoTurno(system: string): { fixo: string; doTurno: s
 }
 
 export function systemComCache(texto: string): Anthropic.TextBlockParam[] {
-  return [{ type: 'text', text: texto, cache_control: EFEMERO } as unknown as Anthropic.TextBlockParam];
+  return [{ type: 'text', text: texto, cache_control: EFEMERO_1H } as unknown as Anthropic.TextBlockParam];
 }
 
 export function ferramentasComCache<T extends object>(ferramentas: T[]): T[] {
   if (!ferramentas.length) return ferramentas;
   const copia = ferramentas.slice();
-  copia[copia.length - 1] = { ...copia[copia.length - 1], cache_control: EFEMERO };
+  copia[copia.length - 1] = { ...copia[copia.length - 1], cache_control: EFEMERO_1H };
   return copia;
 }
 

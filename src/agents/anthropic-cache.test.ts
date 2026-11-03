@@ -4,17 +4,19 @@ import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensage
 import { comLembrete } from './anthropic-executor-obrigatorio';
 
 const marca = { type: 'ephemeral' };
+// 03/11/2026: o que não muda entre turnos (ferramentas e system) fica 1 h; mensagem e fim, 5 min.
+const marca1h = { type: 'ephemeral', ttl: '1h' };
 
 describe('cache de prompt da Anthropic', () => {
   it('o system vira um bloco de texto marcado', () => {
-    expect(systemComCache('persona')).toEqual([{ type: 'text', text: 'persona', cache_control: marca }]);
+    expect(systemComCache('persona')).toEqual([{ type: 'text', text: 'persona', cache_control: marca1h }]);
   });
 
   it('marca só a última ferramenta e não mexe no original', () => {
     const tools = [{ name: 'a' }, { name: 'chamar_executor' }];
     const marcadas = ferramentasComCache(tools);
     expect(marcadas[0]).toEqual({ name: 'a' });
-    expect(marcadas[1]).toEqual({ name: 'chamar_executor', cache_control: marca });
+    expect(marcadas[1]).toEqual({ name: 'chamar_executor', cache_control: marca1h });
     expect(tools[1]).toEqual({ name: 'chamar_executor' });
   });
 
