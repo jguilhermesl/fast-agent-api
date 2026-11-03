@@ -18,6 +18,24 @@ const GREETING_PATTERNS = [
   /^(tchau|até mais|ate mais|até logo|ate logo|adeus|flw|falou|valeu|muito obrigad[oa]|obrigad[oa]|thanks|thank you)[\s!,.…😊🙏👍]*$/i,
 ];
 
+// 03/11/2026: 🖐🏻 de despedida custou 2 rodadas do Sonnet + executor ("Nenhuma ação pendente").
+// Confirmação curta (sozinha ou com "obrigado(a)") e emoji puro não forçam o executor; o modelo
+// ainda pode chamá-lo. "sim"/"quero" ficam de fora: são aceite de oferta e pedem agendamento.
+// Separado de isGreetingOrFarewell de propósito: aquela também decide o "cumprimento calado"
+// (saudacao-espera.ts), que não deve mudar.
+const CONFIRMACAO_PATTERNS = [
+  /^(ok|okay|okey|certo|tá bom|ta bom|tá|beleza|blz|show|perfeito|combinado|entendi)([\s!,.…]+(muito )?obrigad[oa])?[\s!,.…\p{Extended_Pictographic}\p{Emoji_Modifier}️‍]*$/iu,
+  /^[\s\p{Extended_Pictographic}\p{Emoji_Modifier}️‍]+$/u,
+];
+
+/** `true` = o round 0 não precisa forçar o Executor (cumprimento, despedida, confirmação curta, emoji puro). */
+export function dispensaExecutor(message: string): boolean {
+  const trimmed = message.trim();
+  if (isGreetingOrFarewell(trimmed)) return true;
+  if (trimmed.length > 30) return false;
+  return CONFIRMACAO_PATTERNS.some((p) => p.test(trimmed));
+}
+
 export function isGreetingOrFarewell(message: string): boolean {
   const trimmed = message.trim();
   // Saudação pura não passa de 30 chars. Acima disso há pergunta junto.

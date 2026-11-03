@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isGreetingOrFarewell } from './saudacao';
+import { isGreetingOrFarewell, dispensaExecutor } from './saudacao';
 
 // `isGreetingOrFarewell(msg) === true` desliga `tool_choice: 'required'` no round 0.
 // Falso positivo aqui = o agente fala de agenda e preço sem consultar nada.
@@ -29,5 +29,20 @@ describe('isGreetingOrFarewell', () => {
 
   it('mensagem longa nunca conta como saudação', () => {
     expect(isGreetingOrFarewell('Bom dia ' + 'a'.repeat(40))).toBe(false);
+  });
+});
+
+// 03/11/2026: 🖐🏻 de despedida custou 2 rodadas do Sonnet + executor ("Nenhuma ação pendente").
+// Confirmação curta e emoji puro deixam de forçar o executor; o modelo ainda pode chamá-lo.
+describe('confirmação curta e emoji puro não forçam o executor', () => {
+  it.each(['👍', '👍🏻', '🖐🏻', '🙏🙏', '❤️', 'ok', 'Ok!', 'okay', 'certo', 'tá bom', 'ta bom', 'beleza', 'blz', 'show', 'perfeito', 'combinado', 'entendi', 'ok obrigada', 'certo, obrigado 🙏'])('"%s"', (m) => {
+    expect(dispensaExecutor(m)).toBe(true);
+  });
+  it.each(['ok, pode agendar quinta', 'certo, quanto fica?', 'beleza e o hemograma?', 'ok 15h', 'quanto custa?', 'sim', 'quero'])('"%s" continua forçando', (m) => {
+    expect(dispensaExecutor(m)).toBe(false);
+  });
+  it('cumprimento calado (isGreetingOrFarewell) não muda com confirmação curta', () => {
+    expect(isGreetingOrFarewell('ok')).toBe(false);
+    expect(isGreetingOrFarewell('👍🏻')).toBe(false);
   });
 });
