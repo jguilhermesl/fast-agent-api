@@ -4,22 +4,9 @@
 
 // ── Schema neutro (usado internamente e convertido por provider) ──
 
+// 04/11/2026: `atualizar_lead_crm` saiu para todos os agentes (ninguém usa o estágio que a IA
+// gravava; ver agents/sem-crm.ts). O handler segue em tools/handlers.ts para quem quiser religar.
 export const EXECUTOR_TOOLS = [
-  {
-    name: 'atualizar_lead_crm',
-    description:
-      'Atualiza o estágio do lead no CRM. Use quando o lead avança ou muda de fase no funil.',
-    parameters: {
-      type: 'object',
-      properties: {
-        stage: {
-          type: 'string',
-          description: 'Novo estágio do lead no CRM (ex: "agendamento_confirmado", "proposta_enviada")',
-        },
-      },
-      required: ['stage'],
-    },
-  },
   {
     name: 'enviar_arquivo',
     description:
@@ -175,7 +162,7 @@ export const ORCHESTRATOR_TOOLS = [
     description:
       'Executa todas as ações necessárias antes de responder ao cliente: ' +
       'busca na base de conhecimento, executa intenções (agendamento, consulta de preços, envio de protocolo, etc.), ' +
-      'envia arquivos, atualiza CRM e redireciona para humano. ' +
+      'envia arquivos e redireciona para humano. ' +
       'OBRIGATÓRIO: mande TODAS as tarefas do turno juntas no array "tasks", numa chamada só; ' +
       'nunca divida as tarefas em várias chamadas. ' +
       // 30/09/2026: "Nunca chame múltiplas vezes" brigava com a persona ("refaça a
@@ -195,13 +182,12 @@ export const ORCHESTRATOR_TOOLS = [
             properties: {
               tipo: {
                 type: 'string',
-                enum: ['CONSULTA', 'AÇÃO', 'AGENDAMENTO', 'ARQUIVO', 'CRM', 'VENDA', 'CONVERSÃO', 'TRANSFERÊNCIA', 'CONTEXTO'],
+                enum: ['CONSULTA', 'AÇÃO', 'AGENDAMENTO', 'ARQUIVO', 'VENDA', 'CONVERSÃO', 'TRANSFERÊNCIA', 'CONTEXTO'],
                 description:
                   'CONSULTA=buscar informação na base de conhecimento; ' +
                   'AÇÃO=executar uma intenção configurada; ' +
                   'AGENDAMENTO=agendar serviço/consulta (data e horário vão em "contexto", o preço vai em "valor"); ' +
                   'ARQUIVO=enviar arquivo/mídia ao cliente; ' +
-                  'CRM=atualizar estágio do lead (use "valor" com o novo stage); ' +
                   'VENDA=consultar preços ou finalizar proposta; ' +
                   'CONVERSÃO=registrar fechamento/conversão; ' +
                   'TRANSFERÊNCIA=encaminhar para atendimento humano; ' +
@@ -227,7 +213,6 @@ export const ORCHESTRATOR_TOOLS = [
               valor: {
                 type: 'string',
                 description:
-                  'CRM: o slug do novo estágio do funil. ' +
                   'AGENDAMENTO, VENDA e CONVERSÃO: o preço em reais do item (ex.: "R$ 170,00"), ' +
                   'que vai para o campo "valor" da intenção. Nunca ponha data ou horário aqui: ' +
                   'data e horário vão em "contexto".',
