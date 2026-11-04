@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
-import { comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME, LEMBRETE_EXECUTOR_OPCIONAL, decidirRodada0 } from './anthropic-executor-obrigatorio';
+import { comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME, LEMBRETE_EXECUTOR_OPCIONAL, decidirRodada0, rodada0OpenAI } from './anthropic-executor-obrigatorio';
 
 describe('executor obrigatório na Anthropic', () => {
   it('o lembrete vai como bloco a mais no fim da mensagem do cliente, sem mexer no original', () => {
@@ -63,5 +63,20 @@ describe('decidirRodada0', () => {
   it('o lembrete opcional proíbe chamar só para o CRM e mantém valor/data presos ao executor', () => {
     expect(LEMBRETE_EXECUTOR_OPCIONAL).toMatch(/CRM/);
     expect(LEMBRETE_EXECUTOR_OPCIONAL).toMatch(/[Vv]alor e data/);
+  });
+});
+
+// 04/11/2026: Leandro (gpt-5.4): 38% dos turnos eram "só CRM" e 12% chamavam o executor à toa,
+// por causa do tool_choice 'required' na rodada 0. A mesma chave vale no caminho OpenAI.
+describe('rodada0OpenAI', () => {
+  it('padrão: required na rodada 0, sem lembrete', () => {
+    expect(rodada0OpenAI({ round: 0, dispensa: false, opcional: false })).toEqual({ toolChoice: 'required', lembrete: null });
+  });
+  it('com executor_opcional: auto + lembrete opcional', () => {
+    expect(rodada0OpenAI({ round: 0, dispensa: false, opcional: true })).toEqual({ toolChoice: 'auto', lembrete: LEMBRETE_EXECUTOR_OPCIONAL });
+  });
+  it('cumprimento ou rodadas seguintes: auto, sem lembrete', () => {
+    expect(rodada0OpenAI({ round: 0, dispensa: true, opcional: true })).toEqual({ toolChoice: 'auto', lembrete: null });
+    expect(rodada0OpenAI({ round: 1, dispensa: false, opcional: false })).toEqual({ toolChoice: 'auto', lembrete: null });
   });
 });
