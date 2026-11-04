@@ -47,6 +47,18 @@ export function decidirRodada0(p: {
   return { obrigatorio: true, forcar, lembrete: forcar ? null : p.firmeUsado ? LEMBRETE_EXECUTOR_FIRME : LEMBRETE_EXECUTOR };
 }
 
+/**
+ * Rodada 0 do caminho OpenAI/OpenRouter. Sem a chave: `required` (regra de antes). Com
+ * `executor_opcional`: `auto` + o mesmo lembrete opcional do caminho Anthropic.
+ */
+export function rodada0OpenAI(p: { round: number; dispensa: boolean; opcional: boolean }): {
+  toolChoice: 'required' | 'auto';
+  lembrete: string | null;
+} {
+  if (p.round !== 0 || p.dispensa) return { toolChoice: 'auto', lembrete: null };
+  return p.opcional ? { toolChoice: 'auto', lembrete: LEMBRETE_EXECUTOR_OPCIONAL } : { toolChoice: 'required', lembrete: null };
+}
+
 export const LEMBRETE_EXECUTOR_FIRME =
   '[Instrução interna: a resposta anterior saiu sem chamar chamar_executor e foi descartada. Chame chamar_executor agora; a resposta ao cliente vem depois do retorno.]';
 

@@ -52,7 +52,7 @@ import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensagensComMarcadores, separarSystemDoTurno } from './anthropic-cache';
 import {
   tarefasEscritasComoTexto,
-  comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, decidirRodada0,
+  comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, decidirRodada0, rodada0OpenAI,
   LEMBRETE_RESPONDER, MAX_CHAMADAS_EXECUTOR_ANTHROPIC, EXECUTOR_NAO_CHAMADO,
 } from './anthropic-executor-obrigatorio';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
@@ -355,7 +355,13 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
   const tools = toOpenAITools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !dispensaExecutor(req.client_messages);
-  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
+  // `executor_opcional` (prompt_config, 04/11/2026): rodada 0 em 'auto' + lembrete, em vez de 'required'.
+  const executorOpcional = await getExecutorOpcional(req.agent_id);
+  const r0 = rodada0OpenAI({ round: 0, dispensa: !forceExecutor, opcional: executorOpcional });
+  const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada)
+    + (r0.lembrete ? `
+
+${r0.lembrete}` : '');
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: semBlocoCrm(req.system_prompt) + sufixoDeSaida(estilo) + instrucaoCotacao(req) },
@@ -382,7 +388,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
     rounds = round + 1;
     // Round 0: força o executor (exceto em saudações/despedidas)
     // Rounds seguintes: auto — o modelo decide se precisa de mais informações
-    const toolChoice = (round === 0 && forceExecutor) ? 'required' : 'auto';
+    const toolChoice = rodada0OpenAI({ round, dispensa: !forceExecutor, opcional: executorOpcional }).toolChoice;
     const response = await clienteChat(req.model_provider).chat.completions.create({
       model: req.model_name,
       messages: viaOpenRouter ? mensagensParaOpenRouter(req.model_name, messages) : messages,
