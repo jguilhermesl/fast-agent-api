@@ -46,6 +46,7 @@ import { amostragemDoModelo } from './modelo-params';
 import { pedidoDaReserva, modeloDaChamada } from './fallback-openai';
 import { criarClienteOpenRouter, extrasOpenRouter, custoDoOpenRouter, somarCusto, mensagensParaOpenRouter } from '../services/openrouter';
 import { isGreetingOrFarewell, dispensaExecutor } from './saudacao';
+import { semBlocoCrm } from './sem-crm';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensagensComMarcadores, separarSystemDoTurno } from './anthropic-cache';
@@ -287,7 +288,8 @@ async function reescreverComInstrucao(
   const daChamada = modeloDaChamada(req, provider, Boolean(config.openrouterApiKey));
   const modelo = daChamada.modelo;
   // Mesmo corte do runAnthropic, para reaproveitar o cache da persona; na OpenAI vai inteiro.
-  const corte = provider === 'anthropic' ? separarSystemDoTurno(req.system_prompt) : { fixo: req.system_prompt, doTurno: '' };
+  const systemLimpo = semBlocoCrm(req.system_prompt);
+  const corte = provider === 'anthropic' ? separarSystemDoTurno(systemLimpo) : { fixo: systemLimpo, doTurno: '' };
   const system = corte.fixo + sufixoDeSaida(estilo) + instrucaoCotacao(req);
   const conversa = [
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -356,7 +358,7 @@ async function runOpenAI(req: ChatRequest, history: ChatMessage[], deadline: Dea
   const formattedMessage = formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: req.system_prompt + sufixoDeSaida(estilo) + instrucaoCotacao(req) },
+    { role: 'system', content: semBlocoCrm(req.system_prompt) + sufixoDeSaida(estilo) + instrucaoCotacao(req) },
     ...history.map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.tools?.length
@@ -448,7 +450,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   const executorOpcional = await getExecutorOpcional(req.agent_id);
   // Persona fixa no system (cache entre conversas); dados do cliente, horário e CRM
   // vão com a mensagem deste turno (agents/anthropic-cache.ts `separarSystemDoTurno`).
-  const { fixo: systemFixo, doTurno } = separarSystemDoTurno(req.system_prompt);
+  const { fixo: systemFixo, doTurno } = separarSystemDoTurno(semBlocoCrm(req.system_prompt));
   const formattedMessage =
     (doTurno ? `${doTurno}\n\n` : '') + formatClientMessage(req.client_messages, req.client_message_type, nota, req.nota_retomada);
 

@@ -20,8 +20,9 @@ describe('chamar_executor: campo "valor"', () => {
     expect(valor).toMatch(/data e horário vão em "contexto"/);
   });
 
-  it('CRM continua usando "valor" para o estágio (o Executor lê SOMENTE esse campo no CRM)', () => {
-    expect(valor).toMatch(/CRM: o slug do novo estágio do funil/);
+  // 04/11/2026: o tipo CRM saiu para todos os agentes (agents/sem-crm.ts).
+  it('"valor" não fala mais de estágio de CRM', () => {
+    expect(valor).not.toMatch(/CRM/);
   });
 
   it('a descrição do tipo AGENDAMENTO aponta o mesmo contrato', () => {

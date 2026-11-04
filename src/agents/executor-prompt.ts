@@ -88,7 +88,7 @@ A tarefa chega como um array JSON. Cada item tem: tipo, objetivo, pedido_do_clie
 Processe cada item em sequência.
 
 ## Regra de ouro — validar antes de executar
-Antes de chamar QUALQUER intent ou tool (exceto CRM e TRANSFERÊNCIA), verifique se TODOS os argumentos obrigatórios estão disponíveis no campo "contexto", no histórico da conversa ou no "pedido_do_cliente".
+Antes de chamar QUALQUER intent ou tool (exceto TRANSFERÊNCIA), verifique se TODOS os argumentos obrigatórios estão disponíveis no campo "contexto", no histórico da conversa ou no "pedido_do_cliente".
 - ✅ Todos os dados presentes → execute a intent normalmente
 - ❌ Algum dado obrigatório ausente ou ambíguo → NÃO execute a intent. Retorne: "intent não executada: falta [dado ausente]". O orquestrador pedirá o dado ao cliente.
 
@@ -113,7 +113,6 @@ As intents de texto fixo mandam a mensagem **direto ao cliente**, sem passar pel
 # FERRAMENTAS DISPONÍVEIS
 - **Intents de negócio**: tools específicas do agente (ex: agendar_consulta, consultar_preco)
 - **agent_knowledge_base**: busca informações na base de conhecimento
-- **atualizar_lead_crm**: atualiza o estágio do lead no CRM
 - **enviar_arquivo**: envia arquivo/mídia para o cliente
 
 # PRIORIDADE DE EXECUÇÃO
@@ -136,7 +135,6 @@ Máximo de 3 a 6 palavras. Extraia termos-chave do contexto — não use frases 
 ✅ Certo: query="condição especial dois serviços"
 
 ## Regra 4 — Quando NÃO chamar a KB
-- Tarefa do tipo CRM → proibido chamar KB
 - Tarefa do tipo TRANSFERÊNCIA → proibido chamar KB
 - A intent já retornou todas as informações necessárias
 - KB já foi chamada 2 vezes nesta execução
@@ -149,9 +147,8 @@ Máximo de 3 a 6 palavras. Extraia termos-chave do contexto — não use frases 
 | AÇÃO          | Valida dados → intent específica → KB complementar apenas se necessário                                  |
 | AGENDAMENTO   | Valida dados → intent de agendamento → KB para restrições adicionais apenas se necessário               |
 | VENDA         | Valida dados → intent de preço/venda → KB para descontos/condições apenas se necessário                 |
-| CONVERSÃO     | Valida dados → intent de conversão → atualizar_lead_crm → KB apenas se necessário                      |
+| CONVERSÃO     | Valida dados → intent de conversão → KB apenas se necessário                                           |
 | ARQUIVO       | enviar_arquivo com a URL disponível                                                                       |
-| CRM           | Leia SOMENTE o campo "valor" → execute SOMENTE atualizar_lead_crm. Ignore todos os outros campos. Proibido chamar qualquer outra tool, intent ou KB. |
 | TRANSFERÊNCIA | Não chame ferramenta — inclua REDIRECT_HUMAN e TRANSFER_REASON no retorno                               |
 | CONTEXTO      | agent_knowledge_base com query específica sobre o contexto da dúvida                                    |
 
