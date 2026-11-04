@@ -15,6 +15,7 @@ import {
   getAgentIntents,
   getIntentLogsCompletos,
   conversaTemCompromissoCriado,
+  getExecutorOpcional,
   logGuardShadow,
   getMensagensDoCliente,
   getEstiloResposta,
@@ -50,7 +51,7 @@ import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensagensComMarcadores, separarSystemDoTurno } from './anthropic-cache';
 import {
   tarefasEscritasComoTexto,
-  comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME,
+  comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, decidirRodada0,
   LEMBRETE_RESPONDER, MAX_CHAMADAS_EXECUTOR_ANTHROPIC, EXECUTOR_NAO_CHAMADO,
 } from './anthropic-executor-obrigatorio';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
@@ -444,6 +445,7 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
   const tools = toAnthropicTools(ORCHESTRATOR_TOOLS);
   const conversationContext = buildConversationContext(history);
   const forceExecutor = !dispensaExecutor(req.client_messages);
+  const executorOpcional = await getExecutorOpcional(req.agent_id);
   // Persona fixa no system (cache entre conversas); dados do cliente, horário e CRM
   // vão com a mensagem deste turno (agents/anthropic-cache.ts `separarSystemDoTurno`).
   const { fixo: systemFixo, doTurno } = separarSystemDoTurno(req.system_prompt);
@@ -476,9 +478,15 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
     // Round 0: o executor é obrigatório (exceto em saudações/despedidas). Modelo que
     // aceita ferramenta forçada recebe `any`; o que recusa (claude-sonnet-5-5, 16/10)
     // vai com `auto` + lembrete interno (agents/anthropic-executor-obrigatorio.ts).
-    const obrigatorio = round === 0 && forceExecutor;
-    const forcar = obrigatorio && !modelosSemFerramentaForcada.has(usedModel);
-    const lembrete = obrigatorio && !forcar ? (lembreteFirmeUsado ? LEMBRETE_EXECUTOR_FIRME : LEMBRETE_EXECUTOR) : null;
+    // Com `executor_opcional` (prompt_config, 04/11/2026) a rodada 0 vai com um lembrete que
+    // deixa responder direto quando não há o que buscar; sem a chave, a regra de antes.
+    const { obrigatorio, forcar, lembrete } = decidirRodada0({
+      round,
+      dispensa: !forceExecutor,
+      opcional: executorOpcional,
+      aceitaForcada: !modelosSemFerramentaForcada.has(usedModel),
+      firmeUsado: lembreteFirmeUsado,
+    });
     // Cache de prompt (agents/anthropic-cache.ts): ferramentas, system e o fim da
     // conversa vão marcados com `cache_control`; sem isso cada rodada pagava o prompt
     // inteiro. A cópia marcada é montada a cada chamada, `messages` segue sem marca.

@@ -16,6 +16,37 @@ import type Anthropic from '@anthropic-ai/sdk';
 export const LEMBRETE_EXECUTOR =
   '[Instrução interna deste turno, não é do cliente: antes de responder, chame a ferramenta chamar_executor com as tarefas que este pedido precisa. Valor, data, disponibilidade e qualquer dado da clínica só saem do retorno dela.]';
 
+/**
+ * Lembrete da rodada 0 para agente com `prompt_config.executor_opcional = true` (04/11/2026).
+ * O obrigatório fazia o Sonnet inventar tarefa só para cumprir a regra ("CRM: atualizar
+ * estágio" num "Boa tarde"): na Duda, 34% dos turnos pagavam 2 rodadas para responder do
+ * histórico. Este deixa responder direto quando não há o que buscar; valor e data novos
+ * continuam presos ao executor (e a trava de valor sem fonte segue ligada).
+ */
+export const LEMBRETE_EXECUTOR_OPCIONAL =
+  '[Instrução interna deste turno, não é do cliente: chame chamar_executor se este turno precisar de valor, data, agenda, combo, ' +
+  'texto oficial de uma intenção, agendamento ou transferência. Se a resposta já está no histórico desta conversa ou no seu prompt ' +
+  '(cumprimento, agradecimento, endereço, funcionamento, algo que você já passou), responda direto, sem chamar. Nunca chame só para ' +
+  'atualizar o CRM: ele vai junto quando houver outra tarefa. Valor e data que não estão no histórico só saem do retorno do executor.]';
+
+/**
+ * Decide a rodada 0 do caminho Anthropic. `dispensa` = cumprimento/confirmação curta
+ * (`dispensaExecutor`); `aceitaForcada` = o modelo aceita `tool_choice` any.
+ * Sem `opcional`, é exatamente a regra de antes.
+ */
+export function decidirRodada0(p: {
+  round: number;
+  dispensa: boolean;
+  opcional: boolean;
+  aceitaForcada: boolean;
+  firmeUsado: boolean;
+}): { obrigatorio: boolean; forcar: boolean; lembrete: string | null } {
+  if (p.round !== 0 || p.dispensa) return { obrigatorio: false, forcar: false, lembrete: null };
+  if (p.opcional) return { obrigatorio: false, forcar: false, lembrete: LEMBRETE_EXECUTOR_OPCIONAL };
+  const forcar = p.aceitaForcada;
+  return { obrigatorio: true, forcar, lembrete: forcar ? null : p.firmeUsado ? LEMBRETE_EXECUTOR_FIRME : LEMBRETE_EXECUTOR };
+}
+
 export const LEMBRETE_EXECUTOR_FIRME =
   '[Instrução interna: a resposta anterior saiu sem chamar chamar_executor e foi descartada. Chame chamar_executor agora; a resposta ao cliente vem depois do retorno.]';
 

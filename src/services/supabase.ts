@@ -635,6 +635,27 @@ export async function getMidiaNoFluxo(agentId: string): Promise<boolean> {
 }
 
 /**
+ * `agents.prompt_config.executor_opcional === true`: na rodada 0 do caminho Anthropic o
+ * executor deixa de ser obrigatório (agents/anthropic-executor-obrigatorio.ts
+ * `decidirRodada0`). Falha de leitura vale `false`, o comportamento antigo (obrigatório).
+ */
+const executorOpcionalCache = new Map<string, { em: number; ligado: boolean }>();
+
+export async function getExecutorOpcional(agentId: string): Promise<boolean> {
+  const cache = executorOpcionalCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.ligado;
+  let ligado = false;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    ligado = (ag?.prompt_config as { executor_opcional?: unknown } | null)?.executor_opcional === true;
+  } catch (err) {
+    console.error('[ExecutorOpcional] prompt_config não lido, executor segue obrigatório:', err instanceof Error ? err.message : String(err));
+  }
+  executorOpcionalCache.set(agentId, { em: Date.now(), ligado });
+  return ligado;
+}
+
+/**
  * `agents.prompt_config.memoria_por_conversa === true`: conversa nova do mesmo
  * telefone começa com o histórico vazio (memory/conversa.ts). Falha de leitura vale
  * `false`, o comportamento antigo (memória por telefone).
