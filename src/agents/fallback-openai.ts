@@ -44,3 +44,12 @@ export function modeloDaChamada(
   if (provider === reserva.model_provider) return { modelo: reserva.model_name, provedor: provider };
   return { modelo: MODELO_FALLBACK_OPENAI, provedor: 'openai' };
 }
+
+/**
+ * O executor que falhou no OpenRouter pode descer para o padrão (gpt-5.4-mini, OpenAI)?
+ * Não quando ele já era a reserva de um Claude: a Duda não gasta OpenAI (regra do dono,
+ * 04/11/2026; achado do Codex em 06/11: Anthropic → OpenRouter → OpenAI ainda acontecia).
+ */
+export function podeDescerParaOpenAI(reservaClaude: string | null, modeloDaVez: string): boolean {
+  return !(reservaClaude && modeloDaVez === reservaClaude);
+}
