@@ -54,6 +54,7 @@ import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensage
 import {
   tarefasEscritasComoTexto,
   comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, decidirRodada0, rodada0OpenAI,
+  tarefasVazias, textoJuntoDaChamadaVazia, RESPONDA_SEM_TAREFA,
   LEMBRETE_RESPONDER, MAX_CHAMADAS_EXECUTOR_ANTHROPIC, EXECUTOR_NAO_CHAMADO,
 } from './anthropic-executor-obrigatorio';
 import { parseOrchestratorOutput, entregouAoCliente } from './saida';
@@ -427,6 +428,11 @@ ${r0.lembrete}` : '');
     for (const tc of msg.tool_calls) {
       const args = JSON.parse(tc.function.arguments) as { tasks: unknown[] };
       const query = JSON.stringify(args.tasks ?? []);
+      // Chamada sem tarefa (06/11/2026): não roda o executor, pede a resposta.
+      if (tarefasVazias(args)) {
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: RESPONDA_SEM_TAREFA });
+        continue;
+      }
       const executorResult = await runExecutor({
         query,
         agent_id: req.agent_id,
@@ -555,6 +561,25 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       }
     }
 
+    // Chamada vazia ao executor com a resposta já escrita junto (06/11/2026): o turno acaba aqui.
+    const prontoJunto = response.stop_reason === 'tool_use'
+      ? textoJuntoDaChamadaVazia(response.content as unknown as Array<{ type: string; text?: string; input?: unknown }>)
+      : null;
+    if (prontoJunto) {
+      console.warn(`[Orchestrator] ${usedModel} chamou o executor sem tarefa e já trouxe a resposta: usando a resposta`);
+      return {
+        output: prontoJunto,
+        tokensIn: totalIn,
+        tokensOut: totalOut,
+        tokensCached: totalCached,
+        escritaCache: totalEscrita,
+        model: usedModel,
+        rounds,
+        executorTrace: mergeExecutorTraces(allExecutorTraces),
+        communications,
+      };
+    }
+
     if (response.stop_reason !== 'tool_use') {
       const textBlock = response.content.find((b) => b.type === 'text');
       const output = textBlock?.type === 'text' ? textBlock.text : '';
@@ -578,6 +603,11 @@ async function runAnthropic(req: ChatRequest, history: ChatMessage[], deadline: 
       if (block.type !== 'tool_use') continue;
       const args = block.input as { tasks: unknown[] };
       const query = JSON.stringify(args.tasks ?? []);
+      // Chamada sem tarefa (06/11/2026): não roda o executor nem conta no teto; pede a resposta.
+      if (tarefasVazias(args)) {
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: RESPONDA_SEM_TAREFA });
+        continue;
+      }
       // Teto de chamadas ao Executor no turno (agents/anthropic-executor-obrigatorio.ts):
       // a terceira não executa e volta pedindo a resposta com o que já tem.
       if (chamadasExecutor >= MAX_CHAMADAS_EXECUTOR_ANTHROPIC) {

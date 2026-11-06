@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
-import { comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME, LEMBRETE_EXECUTOR_OPCIONAL, decidirRodada0, rodada0OpenAI } from './anthropic-executor-obrigatorio';
+import { comLembrete, ehRecusaDeFerramentaForcada, LEMBRETE_EXECUTOR, LEMBRETE_EXECUTOR_FIRME, LEMBRETE_EXECUTOR_OPCIONAL, decidirRodada0, rodada0OpenAI, tarefasVazias, textoJuntoDaChamadaVazia } from './anthropic-executor-obrigatorio';
 
 describe('executor obrigatório na Anthropic', () => {
   it('o lembrete vai como bloco a mais no fim da mensagem do cliente, sem mexer no original', () => {
@@ -78,5 +78,22 @@ describe('rodada0OpenAI', () => {
   it('cumprimento ou rodadas seguintes: auto, sem lembrete', () => {
     expect(rodada0OpenAI({ round: 0, dispensa: true, opcional: true })).toEqual({ toolChoice: 'auto', lembrete: null });
     expect(rodada0OpenAI({ round: 1, dispensa: false, opcional: false })).toEqual({ toolChoice: 'auto', lembrete: null });
+  });
+});
+
+// 06/11/2026, Duda: 22% dos turnos (149 de 673 em 48 h) chamavam chamar_executor com tasks: [],
+// o código rodava o executor mesmo assim e o ciclo ia a 3,4 rodadas em média (geral 1,9).
+describe('chamada vazia ao executor', () => {
+  it('tasks vazio, ausente ou não-array é vazio; com tarefa não é', () => {
+    expect(tarefasVazias({ tasks: [] })).toBe(true);
+    expect(tarefasVazias({})).toBe(true);
+    expect(tarefasVazias({ tasks: 'x' })).toBe(true);
+    expect(tarefasVazias({ tasks: [{ tipo: 'CONSULTA', objetivo: 'valor' }] })).toBe(false);
+  });
+  it('resposta pronta junto da chamada vazia é aproveitada; texto vazio não', () => {
+    expect(textoJuntoDaChamadaVazia([{ type: 'text', text: '{"mensagens":["Oi"]}' }, { type: 'tool_use', input: { tasks: [] } }])).toBe('{"mensagens":["Oi"]}');
+    expect(textoJuntoDaChamadaVazia([{ type: 'text', text: '  ' }, { type: 'tool_use', input: { tasks: [] } }])).toBeNull();
+    expect(textoJuntoDaChamadaVazia([{ type: 'text', text: 'Vou verificar.' }, { type: 'tool_use', input: { tasks: [] } }])).toBeNull();
+    expect(textoJuntoDaChamadaVazia([{ type: 'tool_use', input: { tasks: [{ tipo: 'CONSULTA' }] } }])).toBeNull();
   });
 });
