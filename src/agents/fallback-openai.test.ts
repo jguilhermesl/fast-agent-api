@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pedidoDoFallback, pedidoDaReserva, claudeNoOpenRouter, modeloDaChamada, MODELO_FALLBACK_OPENAI } from './fallback-openai';
+import { pedidoDoFallback, pedidoDaReserva, claudeNoOpenRouter, modeloDaChamada, podeDescerParaOpenAI, MODELO_FALLBACK_OPENAI } from './fallback-openai';
 
 describe('pedidoDoFallback', () => {
   it('troca provedor E modelo: o fallback do OpenRouter vai para a OpenAI, não para o próprio OpenRouter', () => {
@@ -44,5 +44,15 @@ describe('pedidoDaReserva', () => {
     expect(modeloDaChamada(req, 'anthropic', true)).toEqual({ modelo: 'claude-sonnet-5-5', provedor: 'anthropic' });
     expect(modeloDaChamada(req, 'openrouter', true)).toEqual({ modelo: 'anthropic/claude-sonnet-5.5', provedor: 'openrouter' });
     expect(modeloDaChamada(req, 'openai', true)).toEqual({ modelo: MODELO_FALLBACK_OPENAI, provedor: 'openai' });
+  });
+});
+
+describe('podeDescerParaOpenAI (executor)', () => {
+  it('reserva do Claude que falhou no OpenRouter não desce para a OpenAI', () => {
+    expect(podeDescerParaOpenAI('anthropic/claude-haiku-5.5', 'anthropic/claude-haiku-5.5')).toBe(false);
+  });
+  it('modelo do OpenRouter configurado no agente (não é reserva) segue descendo como antes', () => {
+    expect(podeDescerParaOpenAI(null, 'deepseek/deepseek-v4.1-flash')).toBe(true);
+    expect(podeDescerParaOpenAI('anthropic/claude-haiku-5.5', 'x/outro')).toBe(true);
   });
 });

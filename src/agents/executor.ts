@@ -20,7 +20,7 @@ import type { ExecutorInput, ExecutorTrace, ToolCallLog } from '../types';
 import { buildExecutorPrompt, formatIntentLogs } from './executor-prompt';
 import { amostragemDoModelo } from './modelo-params';
 import { escolherModeloExecutor, MODELO_EXECUTOR_PADRAO } from './modelo-executor';
-import { claudeNoOpenRouter } from './fallback-openai';
+import { claudeNoOpenRouter, podeDescerParaOpenAI } from './fallback-openai';
 import { semBuscaNaBase } from './kb-sem-busca';
 import { textoFixoVizinho } from './texto-fixo-vizinho';
 import { intencoesEsquecidas, cobrancaDeTarefas } from './tarefas-esquecidas';
@@ -262,6 +262,20 @@ export async function runExecutor(input: ExecutorInput): Promise<ExecutorResult>
       // o turno segue no padrão; se já executou, o erro sobe e nada é repetido.
       if (!viaOpenRouter || toolsCalledLog.length) throw err;
       const erro = err instanceof Error ? err.message : String(err);
+      // Reserva de um Claude (Anthropic caiu → mesmo Claude pelo OpenRouter) que também falhou:
+      // não desce para a OpenAI (regra do dono para a Duda, 04/11/2026; achado do Codex 06/11).
+      // O erro sobe e o orquestrador responde com o que tem ou transfere.
+      if (!podeDescerParaOpenAI(reservaClaude, modeloDaVez)) {
+        await logError({
+          conversation_id: input.conversation_id,
+          agent_id: input.agent_id,
+          lead_id: input.lead_id,
+          error_message: `Executor ${modeloDaVez} (reserva do Claude): ${erro} | sem descer para a OpenAI`,
+          provider_failed: 'openrouter',
+          layer: 'executor-fallback',
+        });
+        throw err;
+      }
       await logError({
         conversation_id: input.conversation_id,
         agent_id: input.agent_id,
