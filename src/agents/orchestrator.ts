@@ -47,6 +47,7 @@ import { pedidoDaReserva, modeloDaChamada } from './fallback-openai';
 import { criarClienteOpenRouter, extrasOpenRouter, custoDoOpenRouter, somarCusto, mensagensParaOpenRouter } from '../services/openrouter';
 import { isGreetingOrFarewell, dispensaExecutor } from './saudacao';
 import { semBlocoCrm } from './sem-crm';
+import { pareceMensagemAutomatica } from './mensagem-automatica';
 import { prefixoDeClassificacao } from './objecao';
 import { sufixoDeSaida } from './formato-saida';
 import { systemComCache, ferramentasComCache, mensagensComMarcadorNoFim, mensagensComMarcadores, separarSystemDoTurno } from './anthropic-cache';
@@ -988,7 +989,8 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   const pctCache = result.tokensIn > 0 ? Math.round((result.tokensCached / result.tokensIn) * 100) : 0;
   console.log(`[Orchestrator] provider=${providerUsed} model=${result.model} tokensIn=${result.tokensIn} tokensOut=${result.tokensOut} cached=${result.tokensCached} (${pctCache}%) executorCalled=${result.executorTrace.called}`);
 
-  let parsed = parseOrchestratorOutput(result.output, entregouAoCliente(result.executorTrace.tools_called));
+  // Robô de empresa do outro lado: o vazio do modelo é silêncio pedido pela persona (agents/mensagem-automatica.ts).
+  let parsed = parseOrchestratorOutput(result.output, entregouAoCliente(result.executorTrace.tools_called), pareceMensagemAutomatica(req.client_messages));
 
   // ── Cotação no código (agents/cotacao.ts) ─────────────────────
   // Marcador {{preco|pix|datas:ITEM}} vira o texto exato do item que a busca devolveu

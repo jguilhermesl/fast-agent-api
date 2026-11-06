@@ -116,8 +116,10 @@ function tentarJson(raw: string) {
  * @param raw               texto cru devolvido pelo modelo
  * @param entregouConteudo  `entregouAoCliente(tools do turno)`: se já saiu texto
  *                          fixo ou arquivo, resposta vazia vira silêncio, não erro
+ * @param clienteEhRobo     `pareceMensagemAutomatica` da mensagem do turno: robô de empresa
+ *                          (a persona manda não responder), vazio também vira silêncio
  */
-export function parseOrchestratorOutput(raw: string, entregouConteudo = false): ParsedOutput {
+export function parseOrchestratorOutput(raw: string, entregouConteudo = false, clienteEhRobo = false): ParsedOutput {
   const json = tentarJson(raw);
   if (json && !('vazio' in json)) return json;
 
@@ -127,6 +129,10 @@ export function parseOrchestratorOutput(raw: string, entregouConteudo = false): 
       return { mensagens: [MENSAGEM_INSTABILIDADE], redirect_human: true, transfer_reason: json.transfer_reason ?? 'Resposta vazia do modelo' };
     }
     if (entregouConteudo) return { mensagens: [], redirect_human: false };
+    if (clienteEhRobo) {
+      console.warn('[Orchestrator] silêncio intencional: mensagem automática de empresa do outro lado');
+      return { mensagens: [], redirect_human: false };
+    }
     console.error('[Orchestrator] Resposta vazia sem texto fixo no turno:', raw.slice(0, 300));
     return { mensagens: [MENSAGEM_INSTABILIDADE], redirect_human: true, transfer_reason: 'Resposta vazia do modelo' };
   }
