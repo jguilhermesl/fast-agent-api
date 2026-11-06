@@ -115,3 +115,25 @@ export function tarefasEscritasComoTexto(texto: string): unknown[] | null {
     return null;
   }
 }
+
+/** `chamar_executor` sem tarefa (`tasks` vazio, ausente ou inválido). Não roda o executor. */
+export function tarefasVazias(input: unknown): boolean {
+  const t = (input as { tasks?: unknown } | null)?.tasks;
+  return !Array.isArray(t) || t.length === 0;
+}
+
+/**
+ * Se TODAS as chamadas ao executor da resposta são vazias e a resposta já traz texto, devolve o
+ * texto (é a resposta ao cliente; o turno acaba aqui). Senão, null. 06/11/2026: 22% dos turnos
+ * da Duda chamavam o executor vazio e pagavam 1 a 3 rodadas a mais.
+ */
+export function textoJuntoDaChamadaVazia(blocos: Array<{ type: string; text?: string; input?: unknown }>): string | null {
+  const chamadas = blocos.filter((b) => b.type === 'tool_use');
+  if (!chamadas.length || !chamadas.every((b) => tarefasVazias(b.input))) return null;
+  const texto = blocos.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
+  // Só a resposta no formato de saída; "Vou verificar" solto não vai para o cliente.
+  return /"mensagens"s*:/.test(texto) ? texto : null;
+}
+
+export const RESPONDA_SEM_TAREFA =
+  'Nenhuma tarefa enviada: o executor não foi chamado. Escreva agora a resposta ao cliente, no formato de saída, sem chamar chamar_executor.';
