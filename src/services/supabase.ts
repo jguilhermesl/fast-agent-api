@@ -717,6 +717,26 @@ export async function getNaoRepetirPergunta(agentId: string): Promise<boolean> {
   return ligado;
 }
 
+/**
+ * `agents.prompt_config.enxerga_atendente === true`: a mensagem do turno leva a linha do tempo
+ * real da conversa quando a equipe escreveu nela (agents/atendente-no-historico.ts). Falha = `false`.
+ */
+const enxergaAtendenteCache = new Map<string, { em: number; ligado: boolean }>();
+
+export async function getEnxergaAtendente(agentId: string): Promise<boolean> {
+  const cache = enxergaAtendenteCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.ligado;
+  let ligado = false;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    ligado = (ag?.prompt_config as { enxerga_atendente?: unknown } | null)?.enxerga_atendente === true;
+  } catch (err) {
+    console.error('[Atendente] prompt_config não lido, sem nota do atendente:', err instanceof Error ? err.message : String(err));
+  }
+  enxergaAtendenteCache.set(agentId, { em: Date.now(), ligado });
+  return ligado;
+}
+
 // ── Modelo do Executor por agente ─────────────────────────────
 
 /**

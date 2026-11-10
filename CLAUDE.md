@@ -98,6 +98,14 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   ela. Não conta: pergunta curta ("Tudo bem?"), ficha com link novo, cliente pediu para repetir. Log
   `[PerguntaRepetida]`, `guard_shadow_logs.verdict = pergunta_repetida_<reescrita|insistiu|reescrita_falhou|sem_tempo>`
   e `interaction_logs.payload.logs.turno.pergunta_repetida`. A chave só é lida quando a resposta repete: sem ela, nada muda.
+- **IA enxerga o atendente** (`src/agents/atendente-no-historico.ts`, 10/11/2026): com
+  `prompt_config.enxerga_atendente: true` (só o Leandro), quando a equipe escreveu na conversa nos últimos 14 dias
+  e a fala está entre as 14 últimas, a mensagem do turno leva a linha do tempo real lida de `messages` (cliente, IA
+  e atendente, com dia e hora de Brasília; mídia sem texto vira `[imagem ×3, você não vê o conteúdo]`). Vai junto de
+  `nota_retomada`: só na mensagem do turno, nunca no histórico nem no system. Sem a chave, nada muda. Log
+  `[Atendente]` e `interaction_logs.payload.logs.turno.nota_atendente`. Origem: o eco do celular ia para o Redis na
+  chave do LID (consertado no `messaging-gateway` no mesmo dia), então a IA respondia "SIM" de lembrete manual como
+  resposta a pergunta antiga. O Executor não vê a nota.
 - **Montador em sombra** (`src/agents/montador/`, 23/10/2026): reproduz em código o nó `Prompt_Variavel` do n8n a partir do banco
   (`montar-prompt.ts` função pura; `texto-fixo.ts` = texto da expressão de 23/10 copiado byte a byte; `carregar-entrada.ts` = as mesmas
   consultas do n8n; `sombra.ts` = comparador), compara com o `system_prompt` que o n8n manda no `/api/chat` e registra a diferença.

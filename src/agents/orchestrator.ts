@@ -22,6 +22,7 @@ import {
   getMensagensDaConversa,
   getEstadoDoLead,
   getUltimasMensagensDaConversa,
+  getEnxergaAtendente,
   getUltimaMensagemAnterior,
   getConfigCotacao,
   getBufferDelayMs,
@@ -40,6 +41,7 @@ import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { detectarPerguntaRepetida, tirarPerguntasRepetidas, type PerguntaRepetida } from './pergunta-repetida';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
+import { notaDoAtendente, JANELA_ATENDENTE_NO_HISTORICO_MS } from './atendente-no-historico';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
 import { checarGrounding, checarTarefaSemFerramenta, checarValoresSemFonte, historicoConfiavel, MENSAGEM_SEM_LASTRO } from './guard';
 import { amostragemDoModelo } from './modelo-params';
@@ -876,7 +878,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   // Supabase quando o turno anterior acabou há até 45 s.
   // `response_style` do agente (painel → prompt_config): o n8n não manda no corpo,
   // então vem do banco, com cache curto. Falha de leitura = null = sufixo de antes.
-  const [history, cruzamento, estilo, ultimaAnterior, cfgCotacao, estiloNoCodigo] = await Promise.all([
+  const [history, cruzamento, estilo, ultimaAnterior, cfgCotacao, estiloNoCodigo, falasComAtendente] = await Promise.all([
     getHistory(scopedClientId, 18),
     config.cruzamentoMode === 'off'
       ? Promise.resolve<MotivoCruzamento | null>(null)
@@ -890,6 +892,21 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     getConfigCotacao(req.agent_id),
     // `prompt_config.estilo` (agents/estilo-deterministico.ts). Falha de leitura = undefined = sem ajuste.
     getEstiloNoCodigo(req.agent_id),
+    // O que a equipe escreveu na conversa (agents/atendente-no-historico.ts). Só com a chave do
+    // agente e em conversa real; falha de leitura = sem nota.
+    ehConversaReal(req.conversation_id)
+      ? getEnxergaAtendente(req.agent_id)
+          .then((ligado) =>
+            ligado
+              ? getUltimasMensagensDaConversa(
+                  req.conversation_id,
+                  new Date(Date.now() - JANELA_ATENDENTE_NO_HISTORICO_MS).toISOString(),
+                  60,
+                )
+              : [],
+          )
+          .catch(() => [])
+      : Promise.resolve([]),
   ]);
   // Cotação no código (agents/cotacao.ts): chave do agente, ou o corpo (só a suíte manda).
   req = { ...req, cotacao: { ligado: req.cotacao_no_codigo ?? cfgCotacao.ligado, titulos: cfgCotacao.titulos } };
@@ -897,6 +914,14 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   if (notaRetomada) {
     console.log(`[Retomada] conversation=${req.conversation_id} última anterior=${ultimaAnterior}`);
     req = { ...req, nota_retomada: notaRetomada };
+  }
+  // Vai junto da nota de retomada, só na mensagem do turno (nunca no histórico nem no system).
+  const notaAtendente = notaDoAtendente(falasComAtendente, Date.now());
+  if (notaAtendente) {
+    console.log(`[Atendente] conversation=${req.conversation_id} nota com a linha do tempo da equipe (${notaAtendente.length} caracteres)`);
+    req = { ...req, nota_retomada: req.nota_retomada ? `${req.nota_retomada}
+
+${notaAtendente}` : notaAtendente };
   }
   const nota = cruzamento !== null && config.cruzamentoMode === 'nota';
   if (cruzamento) {
@@ -1300,6 +1325,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
     esperou_fila_ms: vez.esperouMs,
     cruzamento,
     nota_cruzamento: nota,
+    ...(notaAtendente ? { nota_atendente: true } : {}),
     ...(juntouPendente ? { juntou_pendente: true } : {}),
     ...(perguntaRepetidaLog ? { pergunta_repetida: perguntaRepetidaLog } : {}),
   };
