@@ -48,7 +48,8 @@ Valor, valor no Pix e datas de item que a busca trouxe neste turno você NÃO di
 Use o nome do item EXATAMENTE como veio no retorno da busca (copie), principalmente quando houver itens parecidos, como adulto e infantil. Não escreva "R$", dia/mês nem horário desses itens fora do marcador, e não repita o parcelamento depois do \`{{preco:...}}\`.
 Valor que você calcula (soma de dois itens, total com desconto) ou que está escrito no seu prompt continua escrito por você.
 Exemplo:
-"Clínico Geral\\n\\n• Valor: {{preco:Clínico Geral}}\\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA\\n\\nDatas disponíveis:\\n{{datas:Clínico Geral}}"`;
+"Clínico Geral\\n\\n• Valor:\\n💳 CARTÃO: {{preco:Clínico Geral}}\\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA\\n\\nDatas disponíveis:\\n{{datas:Clínico Geral}}"
+Escreva sempre as três linhas de valor assim. Se o item não tiver valor no Pix, o sistema junta tudo em "• Valor: ...".`;
 
 const RETORNO = /\((?:com|sem) direito a retorno[^)]*\)/i;
 /** Marca onde o valor do pix terminou (caractere que não aparece em texto de WhatsApp). */
@@ -242,6 +243,37 @@ export function blocoDeDatas(item: ItemCotacao, titulos: Record<string, string>,
   return entradas.map(([prof, linhas]) => (prof ? `${prof}\n${linhas.join('\n')}` : linhas.join('\n'))).join('\n');
 }
 
+const LINHA_CARTAO = /^\s*(?:💳\s*)?CART[ÃA]O:\s*(\S.*)$/iu;
+const LINHA_PIX = /^\s*(?:💰\s*)?(?:DINHEIRO|PIX)/iu;
+const SO_VALOR = /^\s*(?:[•*-]\s*)?Valor:\s*$/iu;
+const VALOR_COM_TEXTO = /^\s*(?:[•*-]\s*)?Valor:\s*(\S.*)$/iu;
+
+/**
+ * Item sem valor no Pix (ultrassom, combo): a linha do Pix some e a do cartão ficava sozinha,
+ * "• Valor:" + "💳 CARTÃO: R$650 em até 6x ou R$600 à vista". Sem a linha do Pix logo abaixo, o
+ * rótulo de cartão não diz nada e ainda contradiz o texto: vira "• Valor: ..." numa linha só.
+ * Roda linha a linha, olhando a seguinte, por isso entra como `reduce` com o array original.
+ */
+function valorEmUmaLinha(saida: string[], linha: string, i: number, todas: string[]): string[] {
+  // O contrário: valor do cartão escrito na linha "• Valor: ..." e o Pix logo abaixo. O paciente lê
+  // dois preços sem saber qual é qual. Fica sempre no bloco de três linhas, igual em toda resposta.
+  if (LINHA_PIX.test(linha)) {
+    const valorNaLinha = VALOR_COM_TEXTO.exec(saida[saida.length - 1] ?? '');
+    if (valorNaLinha && !LINHA_CARTAO.test(valorNaLinha[1])) {
+      saida[saida.length - 1] = '• Valor:';
+      saida.push(`💳 CARTÃO: ${valorNaLinha[1]}`);
+    }
+    saida.push(linha);
+    return saida;
+  }
+  const cartao = LINHA_CARTAO.exec(linha);
+  if (!cartao || LINHA_PIX.test(todas[i + 1] ?? '')) { saida.push(linha); return saida; }
+  const anterior = saida[saida.length - 1];
+  if (anterior !== undefined && SO_VALOR.test(anterior)) saida[saida.length - 1] = `${anterior.trimEnd()} ${cartao[1]}`;
+  else saida.push(`• Valor: ${cartao[1]}`);
+  return saida;
+}
+
 /** Troca os marcadores das mensagens pelo texto dos itens do turno. */
 export function resolverMarcadores(
   mensagens: string[],
@@ -289,6 +321,7 @@ export function resolverMarcadores(
         return nova.replace(DEPOIS_DO_PIX, (_m, aVista: string) => (anexa ? `${aVista} ${retornoDoPix}` : aVista));
       })
       .filter((l): l is string => l !== null)
+      .reduce<string[]>(valorEmUmaLinha, [])
       .join('\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim(),

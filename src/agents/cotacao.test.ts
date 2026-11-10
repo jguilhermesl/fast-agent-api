@@ -77,6 +77,7 @@ describe('cotação no código', () => {
     expect(blocoDeDatas(cat[1], titulos)).toBe('Sem data aberta na agenda no momento.');
   });
 
+  // O modelo escreveu o cartão na linha "• Valor:" e o Pix abaixo: sai sempre no bloco de três linhas (10/11/2026).
   it('resposta com marcadores sai com o texto exato da busca', () => {
     const r = resolverMarcadores([
       'Clínico Geral\n\n• Valor: {{preco:Clínico Geral}}\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA\n\nDatas disponíveis:\n{{datas:Clínico Geral}}',
@@ -85,7 +86,7 @@ describe('cotação no código', () => {
     expect(r.naoResolvidos).toEqual([]);
     expect(r.resolvidos).toBe(3);
     expect(r.mensagens[0]).toBe(
-      'Clínico Geral\n\n• Valor: R$85 - 3X SEM JUROS (Com direito a retorno)\n💰 DINHEIRO/PIX: R$ 75 À VISTA (Com direito a retorno)\n\nDatas disponíveis:\nDr. Edson José\n• Sábado, 17/10 às 07h (ordem de chegada)\nDra. Rayanne Miranda\n• Terça-feira, 20/10 das 09h às 11h (ordem de chegada)',
+      'Clínico Geral\n\n• Valor:\n💳 CARTÃO: R$85 - 3X SEM JUROS (Com direito a retorno)\n💰 DINHEIRO/PIX: R$ 75 À VISTA (Com direito a retorno)\n\nDatas disponíveis:\nDr. Edson José\n• Sábado, 17/10 às 07h (ordem de chegada)\nDra. Rayanne Miranda\n• Terça-feira, 20/10 das 09h às 11h (ordem de chegada)',
     );
     expect(r.mensagens[1]).toBe('Qual fica melhor pra você? 😊');
   });
@@ -129,6 +130,23 @@ describe('cotação no código', () => {
   it('pix inexistente apaga a linha inteira', () => {
     const r = resolverMarcadores(['• Valor: {{preco:USG Abdome Total}}\n💰 Pix: {{pix:USG Abdome Total}} à vista\nNão exige requisição.'], cat);
     expect(r.mensagens[0]).toBe('• Valor: R$135,00 em até 2x sem juros\nNão exige requisição.');
+  });
+
+  it('sem pix, a linha de cartão não fica sozinha: vira "• Valor:" numa linha (LP, 10/11/2026)', () => {
+    // O modelo escreve o bloco de duas linhas para todo item; ultrassom e combo não têm pix.
+    const r = resolverMarcadores(
+      ['ULTRASSOM/USG ABDOME TOTAL\n\n• Valor:\n💳 CARTÃO: {{preco:USG Abdome Total}}\n💰 DINHEIRO/PIX: {{pix:USG Abdome Total}} À VISTA\n\nDatas disponíveis:'],
+      cat,
+    );
+    expect(r.mensagens[0]).toBe('ULTRASSOM/USG ABDOME TOTAL\n\n• Valor: R$135,00 em até 2x sem juros\n\nDatas disponíveis:');
+    // Sem a linha "• Valor:" antes, o rótulo de cartão vira o de valor.
+    const s = resolverMarcadores(['Combo\n💳 CARTÃO: {{preco:USG Abdome Total}}\n💰 DINHEIRO/PIX: {{pix:USG Abdome Total}} À VISTA'], cat);
+    expect(s.mensagens[0]).toBe('Combo\n• Valor: R$135,00 em até 2x sem juros');
+  });
+
+  it('com pix, as duas linhas ficam como o modelo escreveu', () => {
+    const r = resolverMarcadores(['• Valor:\n💳 CARTÃO: {{preco:Clínico Geral}}\n💰 DINHEIRO/PIX: {{pix:Clínico Geral}} À VISTA'], cat);
+    expect(r.mensagens[0]).toBe('• Valor:\n💳 CARTÃO: R$85 - 3X SEM JUROS (Com direito a retorno)\n💰 DINHEIRO/PIX: R$ 75 À VISTA (Com direito a retorno)');
   });
 
   it('item que a busca não trouxe fica marcado como não resolvido (quem chama decide)', () => {
