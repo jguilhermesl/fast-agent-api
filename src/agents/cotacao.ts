@@ -143,6 +143,15 @@ export function acharItem(pedido: string, catalogo: ItemCotacao[]): ItemCotacao 
   const porApelido = catalogo.filter((i) => i.nome.split(/[,/|]/).some((a) => normalizar(a) === p));
   if (porApelido.length === 1) return porApelido[0];
 
+  // O parêntese do nome é a composição do item, não o nome: "Parecer Cardiológico (Consulta +
+  // Eletrocardiograma + Parecer Cardiológico)". O modelo escreve só "Parecer Cardiológico" e, como
+  // "Cardiologia (Eletrocardiograma + Parecer Cardiológico + ...)" e "Parecer Cardiológico Infantil
+  // (...)" também têm essas palavras, dava ambíguo e o bloco saía vazio para o paciente (10/11/2026).
+  // Nome antes do parêntese igual ao pedido, em um item só, decide.
+  const semParentese = (nome: string): string => nome.replace(/\s*\(.*$/s, '');
+  const porNomeBase = catalogo.filter((i) => i.nome.includes('(') && semParentese(i.nome).split(/[,/|]/).some((a) => normalizar(a) === p));
+  if (porNomeBase.length === 1) return porNomeBase[0];
+
   const doPedido = palavras(pedido);
   if (!doPedido.length) return null;
 
