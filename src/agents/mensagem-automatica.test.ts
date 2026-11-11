@@ -12,6 +12,15 @@ describe('pareceMensagemAutomatica', () => {
     '*Resposta Automática* \nOlá! Gilda Kit Festa Agradecemos Seu Contato Vou Lhe Mandar A Tabela!',
     'Olá CAIO, há uma atualização disponível sobre o seu cartao Bradesco. Se precisar de mais informações, estamos à disposição.',
     'Digite 1 para falar com o financeiro ou 2 para suporte',
+    // 11/11/2026: ausência de conta comercial respondendo ao follow-up da Duda.
+    'Olá, aqui é da Recruta Fardamentos 🌟\n‼️No momento não estamos mais disponíveis para atendimento. Por favor deixe sua mensagem que retornaremos assim que possível.\n\n\n⏰ Nosso horário de atendimento é de segunda a sexta das 08:30 às 17:30 e no sábado das 08:00 às 12:00.',
+    // 09/11/2026: convite de aplicativo.
+    'Convide amigos para entrar no TikTok Lite usando seu código e ganhe recompensas! https://www.tiktok.com/d/4/ZS9fka682RCyv-ULnLx/',
+    'No momento não estamos disponíveis. Deixe sua mensagem.',
+    // Texto padrão de ausência do WhatsApp Business (5 vezes na Duda em 30 dias).
+    'Agradecemos sua mensagem. Não estamos disponíveis no momento, mas responderemos assim que possível.',
+    'Seja bem vindo! 😊\n\nA Gastro.PE Olinda agradece seu contato. Responderemos dentro de instantes.',
+    'Obrigado pelo contato! Nosso horário de funcionamento é das 8h às 18h. Responderemos em breve.',
   ])('robô: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(true));
 
   it.each([
@@ -20,6 +29,11 @@ describe('pareceMensagemAutomatica', () => {
     'Meu plano é Bradesco Saúde, vocês aceitam?',
     'Recebi a mensagem automática de vocês, quero agendar',
     'Pode me mandar a tabela de preços?',
+    'Qual o horário de atendimento de vocês?',
+    'Vi esse vídeo de vocês https://www.tiktok.com/@lpsaude/video/123 fazem esse exame?',
+    'Não estou disponível nesse dia, tem outro?',
+    'Vou deixar minha mensagem aqui, me retornem quando puderem',
+    'Minha amiga me convidou, ganhei um desconto?',
   ])('paciente: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(false));
 });
 
