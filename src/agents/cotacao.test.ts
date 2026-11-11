@@ -227,6 +227,38 @@ describe('cotação: achados da suíte de 16/10', () => {
     expect(acharItem('cardiologia', cat)).toBeNull();
   });
 
+  // 10/11/2026 20:25, lead final 8754: a Duda escreveu {{preco:Parecer Cardiológico}} com os três
+  // itens de cardiologia no turno; nenhum marcador resolveu e a paciente recebeu "• Valor:" e
+  // "Datas disponíveis:" vazios (guard cotacao_reescrita_falhou).
+  describe('nome do item sem o parêntese da composição', () => {
+    const p = (nome: string, preco: string, precoPix?: string) => ({ nome, preco, precoPix, disponibilidades: [{ 'data/horario': 'quarta, 18/11/2026 - 13:30 - Ordem de chegada', profissional: 'André Macedo' }] });
+    const cardio = catalogoDoTurno([{ tool: 'conferir_especialidades', result: [
+      p('Cardiologista/Cardiologia (Eletrocardiograma + Parecer Cardiológico + Consulta + Retorno 15 dias)', 'R$170 - 3X SEM JUROS (Com direito a retorno)', 'R$ 160'),
+      p('Parecer Cardiológico (Consulta + Eletrocardiograma + Parecer Cardiológico)', 'R$160 - 3X SEM JUROS (Sem direito a retorno)', 'R$ 145'),
+      p('Parecer Cardiológico Infantil (Eletrocardiograma + Parecer Cardiológico)', 'R$150 (Sem direito a retorno)'),
+    ] }]);
+
+    it('"Parecer Cardiológico" é o adulto, não o infantil nem a cardiologia', () => {
+      expect(acharItem('Parecer Cardiológico', cardio)?.preco).toBe('R$160 - 3X SEM JUROS (Sem direito a retorno)');
+      expect(acharItem('Parecer Cardiológico Infantil', cardio)?.preco).toBe('R$150 (Sem direito a retorno)');
+      expect(acharItem('Cardiologista', cardio)?.precoPix).toBe('R$ 160');
+      expect(acharItem('Cardiologia', cardio)?.precoPix).toBe('R$ 160');
+    });
+
+    it('o bloco do turno real sai preenchido', () => {
+      const r = resolverMarcadores(['Parecer Cardiológico\n• Inclui consulta, eletrocardiograma e parecer cardiológico\n\n• Valor:\n💳 CARTÃO: {{preco:Parecer Cardiológico}}\n💰 DINHEIRO/PIX: {{pix:Parecer Cardiológico}} À VISTA\n\nDatas disponíveis:\n{{datas:Parecer Cardiológico}}'], cardio, { 'André Macedo': 'Dr.' });
+      expect(r.naoResolvidos).toEqual([]);
+      expect(r.mensagens[0]).toContain('💳 CARTÃO: R$160 - 3X SEM JUROS (Sem direito a retorno)');
+      expect(r.mensagens[0]).toContain('💰 DINHEIRO/PIX: R$ 145 À VISTA (Sem direito a retorno)');
+      expect(r.mensagens[0]).toContain('Dr. André Macedo\n• Quarta-feira, 18/11 às 13h30 (ordem de chegada)');
+    });
+
+    it('dois itens com o mesmo nome antes do parêntese continuam ambíguos (não chuta)', () => {
+      const cat = catalogoDoTurno([{ tool: 'conferir_especialidades', result: [p('Eletrocardiograma (sem laudo)', 'R$40'), p('Eletrocardiograma (com laudo)', 'R$160')] }]);
+      expect(acharItem('Eletrocardiograma', cat)).toBeNull();
+    });
+  });
+
   it('{{datas:ITEM|PROFISSIONAL}} filtra (parecer para concurso só com o Dr. André)', () => {
     const cat = catalogoDoTurno([mk('Parecer Cardiológico', [
       { 'data/horario': 'quarta, 21/10/2026 - 13:30 - Ordem de chegada', profissional: 'André Macedo' },
