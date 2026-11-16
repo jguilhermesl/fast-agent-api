@@ -21,6 +21,10 @@ describe('pareceMensagemAutomatica', () => {
     'Agradecemos sua mensagem. Não estamos disponíveis no momento, mas responderemos assim que possível.',
     'Seja bem vindo! 😊\n\nA Gastro.PE Olinda agradece seu contato. Responderemos dentro de instantes.',
     'Obrigado pelo contato! Nosso horário de funcionamento é das 8h às 18h. Responderemos em breve.',
+    // 14/11/2026: saudação de conta comercial respondendo ao follow-up da Duda (card #1419).
+    'velas e sabonetes artesanal agradece seu contato. Como podemos ajudar?',
+    // 13/11/2026: encaminhamento automático de empresa para atendente.
+    'Vamos te direcionar para um de nossos atendentes.\n• Horário de atendimento: segunda a sexta, das 9h às 18h( horário de Brasília, exceto feriados).\n• Se o contato ocorrer próximo ao fim do horário, o atendimento pode não ser concluído , nesse caso, fale conosco novamente no próximo dia útil.',
   ])('robô: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(true));
 
   it.each([
@@ -34,6 +38,10 @@ describe('pareceMensagemAutomatica', () => {
     'Não estou disponível nesse dia, tem outro?',
     'Vou deixar minha mensagem aqui, me retornem quando puderem',
     'Minha amiga me convidou, ganhei um desconto?',
+    'Como podemos fazer para agendar?',
+    'Vocês podem me ajudar? Agradeço o contato',
+    'Qual o horário de atendimento: de manhã ou de tarde?',
+    'Vocês abrem no sábado ou é exceto feriados?',
   ])('paciente: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(false));
 });
 
