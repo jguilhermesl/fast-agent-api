@@ -36,6 +36,14 @@ const FRACOS = [
   /\bganhe (recompensas?|pr[eê]mios?|b[oô]nus|dinheiro|moedas)\b/i,
   /\busando (o )?(seu|meu) c[oó]digo\b/i,
   /https?:\/\/\S*\b(tiktok|kwai|shopee|temu|shein)\.\S+/i,
+  // Saudação de conta comercial: "nós" oferecendo ajuda (14/11/2026: "velas e sabonetes artesanal agradece seu
+  // contato. Como podemos ajudar?", resposta ao follow-up da Duda; com 1 sinal só, virou "instabilidade").
+  /\bcomo (podemos|poderemos) (te |lhe )?(ajudar|servir)\b/i,
+  // Encaminhamento automático para atendente (13/11/2026: "Vamos te direcionar para um de nossos atendentes.
+  // • Horário de atendimento: segunda a sexta, das 9h às 18h (... exceto feriados)").
+  /\b(um|uma) de noss[oa]s (atendentes|consultor(es|as)|especialistas)\b/i,
+  /hor[aá]rio de atendimento\s*:/i,
+  /\bexceto feriados\b/i,
 ];
 
 export function pareceMensagemAutomatica(mensagem: string): boolean {
