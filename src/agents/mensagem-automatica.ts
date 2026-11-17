@@ -17,6 +17,10 @@
  * `decidirRoboNoRabo`): uma mensagem só nunca cala a IA, porque paciente encaminha mensagem
  * automática para perguntar sobre ela.
  */
+// Pesquisa de satisfação. Tem de citar o atendimento: paciente pergunta "Como você avalia esses
+// resultados?\n1 - Glicose: 180\n2 - Colesterol: 240" (5ª revisão do Codex, 17/11/2026).
+const COMO_AVALIA_O_ATENDIMENTO = /\bcomo\s+voc[eê]\s+avalia\s+(o\s+|a\s+)?(meu\s+|minha\s+|noss[oa]\s+|este\s+|esse\s+|esta\s+|essa\s+)?(atendimento|servi[cç]o|suporte|experi[eê]ncia)\b/i;
+
 const FORTES = [
   /resposta autom[aá]tica\*?\s*\n/i,
   /^\s*\*?resposta autom[aá]tica/i,
@@ -66,7 +70,7 @@ const FRACOS = [
   /\batendimento\s+(foi\s+)?(finalizado|encerrado)\b/i,
   /\bprotocolo\b[^\n]{0,25}\d{6,}/i,
   // Pesquisa de satisfação ("Como você avalia o meu atendimento? *5* – Muito satisfeito...").
-  /\bcomo\s+voc[eê]\s+avalia\b/i,
+  COMO_AVALIA_O_ATENDIMENTO,
 ];
 
 /**
@@ -95,13 +99,23 @@ export function temOpcoesNumeradas(mensagem: string): boolean {
 const FALA_DE_GENTE = /\b(tentei|apareceu|aparecendo|recebi\s+(ess[ae]|est[ae]|isso|uma?)|mandaram|o\s+que\s+(eu\s+)?(fa[cç]o|devo\s+fazer)|voc[eê]s|pra\s+mim|me\s+ajud[ae]m?)\b/i;
 const INICIO_DE_ITEM = new RegExp(ITEM_DE_MENU.source);
 
-/** O texto fora do menu: em cada linha, corta do primeiro item numerado até o fim. */
+/**
+ * O texto fora do menu. Em cada linha sai o trecho que vai do primeiro item numerado até o fim do
+ * rótulo do último item (primeiro ponto, interrogação ou exclamação). O que vem depois volta a
+ * contar: "1 - Consulta 2 - Exame. Vocês fazem ultrassom?" é gente perguntando depois de colar o
+ * menu, e "1 - Agendamento 2 - Resultados. Digite uma das opções acima." é a instrução do menu.
+ */
 function foraDosItens(mensagem: string): string {
   return mensagem
     .split('\n')
     .map((linha) => {
-      const i = linha.search(INICIO_DE_ITEM);
-      return i < 0 ? linha : linha.slice(0, i);
+      const primeiro = linha.search(INICIO_DE_ITEM);
+      if (primeiro < 0) return linha;
+      let ultimo = primeiro;
+      for (const achado of linha.matchAll(ITEM_DE_MENU)) ultimo = achado.index ?? ultimo;
+      const rotulo = linha.slice(ultimo);
+      const fim = rotulo.search(/[.?!](\s|$)/);
+      return fim < 0 ? linha.slice(0, primeiro) : `${linha.slice(0, primeiro)} ${rotulo.slice(fim + 1)}`;
     })
     .join('\n');
 }
@@ -112,7 +126,7 @@ const MAX_CARACTERES = 6000;
 /** Cabeçalho que pede uma escolha: junto de itens numerados, é menu ("escolha a opção que melhor descreve...", pesquisa de satisfação). */
 const PEDE_ESCOLHA = [
   /\b(escolha|selecione)\s+(a\s+op[cç][aã]o|uma\s+op[cç][aã]o|qual|o\s+(n[uú]mero|servi[cç]o|setor|assunto))\b/i,
-  /\bcomo\s+voc[eê]\s+avalia\b/i,
+  COMO_AVALIA_O_ATENDIMENTO,
 ];
 
 /**

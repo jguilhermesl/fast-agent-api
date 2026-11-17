@@ -112,8 +112,10 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   ("tentei", "apareceu", "vocês", "pra mim": `FALA_DE_GENTE`; só no menu com cabeçalho de instrução fora dos itens
   numerados é que a fala de gente dentro do item não conta, porque menu escreve opção na primeira pessoa). Lista
   numerada sozinha não é sinal de robô. A fala do turno tem de ser igual às últimas mensagens da sequência, coladas.
-  Quatro passadas de revisão independente do Codex no mesmo dia acharam 14 defeitos (7 calavam gente em sequências
-  de teste, nenhum visto em produção); cada um virou teste. Limite conhecido: a mesma mensagem
+  Cinco passadas de revisão independente do Codex no mesmo dia acharam 16 defeitos (9 calavam gente em sequências
+  de teste, nenhum visto em produção); cada um virou teste. A 5ª passada parou no limite de uso do Codex: as duas
+  últimas correções (pesquisa de satisfação tem de citar o atendimento; pergunta da pessoa depois do último item do
+  menu colado) foram conferidas pelo script de reprodução dele e pelos testes, sem nova revisão. Limite conhecido: a mesma mensagem
   de 60+ caracteres 5 vezes seguidas, com resposta nossa no meio, pausa mesmo sendo gente (em 30 dias ninguém passou
   de 2). Ligação coberta em `orchestrator.robo.test.ts`.
   Simulado em 30 dias com o código (42.802 textos recebidos): 6 conversas, todas robô (B4, Claro, Shopee, 3 menus);

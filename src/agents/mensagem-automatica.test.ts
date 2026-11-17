@@ -44,6 +44,8 @@ describe('pareceMensagemAutomatica', () => {
     // 4ª revisão do Codex: menu com a instrução dentro do item ou depois dos itens.
     '1 - Digite 1 para agendar\n2 - Digite 2 para resultados',
     '1 - Agendamento 2 - Resultados. Digite uma das opções acima.',
+    'Atendimento encerrado. Como você avalia nosso atendimento?',
+    'Escolha uma das opções:\n1 - Quero agendar!\n2 - O que faço para cancelar?\n3 - Falar com atendente.',
   ])('robô: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(true));
 
   it.each([
@@ -86,6 +88,13 @@ describe('pareceMensagemAutomatica', () => {
     'Bradesco Saúde:\n1 - Vocês aceitam meu plano?\n2 - Podem marcar a consulta?',
     'Meu plano é Bradesco.\n1 - Atendem cardiologia?\n2 - Preciso agendar para amanhã.',
     'Escolha a opção que for melhor pra mim: 1- segunda 2- terça',
+    // 5ª revisão do Codex: paciente pedindo avaliação de exame não é pesquisa de satisfação.
+    'Como você avalia esses resultados?\n1 - Glicose: 180\n2 - Colesterol: 240',
+    'Como você avalia esses exames?\n1 - Hemoglobina: 10\n2 - Ferritina: 8',
+    // 5ª revisão do Codex: menu colado e a pergunta da pessoa logo depois do último item.
+    'Escolha uma das opções:\n1 - Consulta\n2 - Exame. Vocês fazem ultrassom?',
+    'Digite o número da opção:\n1 - Ultrassom\n2 - Ressonância. Tentei agendar, podem me ajudar?',
+    'Escolha uma das opções:\n1 - Consulta\n2 - Exame\nVocês fazem ultrassom?',
     // 3ª revisão do Codex: pedido de gente depois de 6 mil caracteres de texto encaminhado.
     'Digite menu para continuar\n' + 'Detalhes da cobrança. '.repeat(300) + '\nVocês podem verificar esta cobrança?',
     'Escolha uma das opções\n' + 'Detalhes da consulta. '.repeat(300) + '\nTentei agendar, podem me ajudar?',

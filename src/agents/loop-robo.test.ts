@@ -258,6 +258,18 @@ describe('robô reconhecido pelo rabo da conversa (card #1223)', () => {
       expect(decidir([cliente(P1), ia('Como posso ajudar?'), cliente(P2)]).loop).toBe(false);
     });
 
+    it('5ª revisão do Codex: paciente pedindo avaliação de exames em lista numerada não é robô', () => {
+      const E1 = 'Como você avalia esses resultados?\n1 - Glicose: 180\n2 - Colesterol: 240';
+      const E2 = 'Como você avalia esses exames?\n1 - Hemoglobina: 10\n2 - Ferritina: 8';
+      expect(decidir([cliente(E1), ia('Vou verificar.'), cliente(E2)]).loop).toBe(false);
+    });
+
+    it('5ª revisão do Codex: menu colado com a pergunta da pessoa depois do último item não é robô', () => {
+      const M1 = 'Escolha uma das opções:\n1 - Consulta\n2 - Exame. Vocês fazem ultrassom?';
+      const M2 = 'Digite o número da opção:\n1 - Ultrassom\n2 - Ressonância. Tentei agendar, podem me ajudar?';
+      expect(decidir([cliente(M1), ia('Como posso ajudar?'), cliente(M2)]).loop).toBe(false);
+    });
+
     it('4ª revisão do Codex: texto montado com 38 prefixos longos não custa segundos de CPU', () => {
       const S = 'Digite menu ';
       const K = Math.floor(65_000 / S.length);
