@@ -31,6 +31,7 @@ import {
   getMensagensRecebidasDesde,
   getMemoriaPorConversa,
   getNaoRepetirPergunta,
+  getTravaUnidade,
   conversaSemSaida,
 } from '../services/supabase';
 import { cortarSeConversaNova } from '../memory/conversa';
@@ -40,6 +41,7 @@ import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas 
 import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { detectarPerguntaRepetida, tirarPerguntasRepetidas, type PerguntaRepetida } from './pergunta-repetida';
+import { acrescentarAvisos, checarDataUnidade, checarServico, instrucaoDataUnidade, mapaDaAgenda } from './trava-unidade';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { notaDoAtendente, JANELA_ATENDENTE_NO_HISTORICO_MS } from './atendente-no-historico';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
@@ -1268,7 +1270,79 @@ ${notaAtendente}` : notaAtendente };
       : { mensagens: [MENSAGEM_VALOR_A_CONFIRMAR], redirect_human: true, transfer_reason: 'Cotação sem item correspondente na busca: a equipe confirma valor e datas.' };
   }
 
+  // ── Trava de unidade (agents/trava-unidade.ts, 17/11/2026) ─────────────
+  // Só com `prompt_config.trava_unidade` (Leandro). 1) data oferecida numa unidade que a agenda do
+  // turno não tem nessa data: refaz UMA vez; se insistir, pede o dia em vez de mandar o horário errado.
+  // 2) serviço que só existe em algumas unidades (invertida = Ibiporã) com data em outra unidade e sem
+  // aviso: o código acrescenta o aviso fixo. Falha-aberto: erro aqui deixa a resposta seguir.
+  if (parsed.mensagens.length && !parsed.redirect_human) {
+    const trava = await getTravaUnidade(req.agent_id);
+    if (trava) {
+      try {
+        const agenda = mapaDaAgenda([
+          ...result.executorTrace.tools_called.map((t) => t.result),
+          ...result.communications.map((c) => c.result),
+        ]);
+        const violacoes = checarDataUnidade(parsed.mensagens, agenda);
+        if (violacoes.length) {
+          const originais = parsed.mensagens;
+          let desfecho: 'shadow' | 'reescrito' | 'pediu_dia' = 'shadow';
+          if (trava.modo === 'enforce' && !ehDemonstracao(req.conversation_id)) {
+            const revisto = deadline.expired()
+              ? null
+              : await reescreverComInstrucao(req, history, estilo, providerUsed, result, instrucaoDataUnidade(violacoes), deadline, 'TravaUnidade');
+            if (revisto && revisto.mensagens.length && checarDataUnidade(revisto.mensagens, agenda).length === 0) {
+              parsed = revisto;
+              desfecho = 'reescrito';
+            } else {
+              parsed = { ...parsed, mensagens: [MENSAGEM_DATA_A_CONFIRMAR] };
+              desfecho = 'pediu_dia';
+            }
+          }
+          console.warn(`[TravaUnidade] data_unidade ${desfecho}: ${violacoes.map((v) => v.data + '@' + v.unidade).join(', ')} (lead ${req.lead_id})`);
+          await logGuardShadow({
+            agent_id: req.agent_id,
+            conversation_id: req.conversation_id,
+            lead_id: req.lead_id,
+            verdict: `unidade_data_${desfecho}`,
+            tokens: violacoes.map((v) => `${v.data}@${v.unidade} (agenda: ${v.unidadesDaAgenda.join('/')})`),
+            mensagens: desfecho === 'shadow' ? originais : [...originais, '--- enviado ---', ...parsed.mensagens],
+            tools_called: result.executorTrace.tools_called.map((t) => t.tool),
+            guard_mode: trava.modo,
+          });
+        }
+        if (trava.servicos.length && !parsed.redirect_human) {
+          const avisos = checarServico({
+            mensagens: parsed.mensagens,
+            clientMessage: req.client_messages,
+            falasRecentesDoAgente: history.filter((h) => h.role === 'assistant').slice(-2).map((h) => h.content),
+            agenda,
+            servicos: trava.servicos,
+            unidades: trava.unidades,
+          });
+          if (avisos.length) {
+            const originais = parsed.mensagens;
+            if (trava.modo === 'enforce') parsed = { ...parsed, mensagens: acrescentarAvisos(parsed.mensagens, avisos) };
+            await logGuardShadow({
+              agent_id: req.agent_id,
+              conversation_id: req.conversation_id,
+              lead_id: req.lead_id,
+              verdict: trava.modo === 'enforce' ? 'servico_unidade_aviso' : 'servico_unidade_shadow',
+              tokens: avisos.map((a) => a.gatilho),
+              mensagens: trava.modo === 'enforce' ? [...originais, '--- enviado ---', ...parsed.mensagens] : originais,
+              tools_called: result.executorTrace.tools_called.map((t) => t.tool),
+              guard_mode: trava.modo,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[TravaUnidade] falhou, resposta segue como está:', err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+
   // Guard de agendamento: a resposta não pode afirmar que o horário está marcado
+  // sem que o evento exista.
   // sem que o evento exista. Só toca a rede quando o texto casa o padrão de
   // confirmação — nos demais turnos o custo é uma regex.
   if (afirmaAgendamento(parsed.mensagens)) {
