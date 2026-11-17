@@ -55,11 +55,16 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   low`; família gpt-6/5.6 com `reasoning.effort: none`. Claude pelo OpenRouter **não** usa o crédito da
   Anthropic. Nenhum agente em produção usa OpenRouter ainda: o primeiro uso precisa de teste de fumaça pago
   (uma chamada com ferramenta por modelo) e do agente de teste. Base: `../estudo-20261031-mercado/README.md`.
-- **Trava de unidade** (`src/agents/trava-unidade.ts`, 17/11/2026), só com `prompt_config.trava_unidade`
-  (Leandro): data oferecida numa unidade que a agenda do turno não tem nessa data → refaz uma vez, se insistir
-  pede o dia; serviço restrito (invertida = Ibiporã) com data em outra unidade e sem aviso → acrescenta o
-  `aviso_texto`. Veredito em `guard_shadow_logs` (`unidade_data_*`, `servico_unidade_*`). Simulação nos 1.818
-  turnos reais de 30 dias: `npx tsx scripts/replay-trava-unidade.ts turnos.json config.json` (0 e 54).
+- **Trava de unidade** (`src/agents/trava-unidade.ts`, 17/11/2026, v2 depois da revisão do Codex), só com
+  `prompt_config.trava_unidade` (Leandro). Roda **antes** dos guards de lastro, cotação e agendamento (a
+  reescrita dela passa por eles). Data oferecida numa unidade que a agenda do turno não tem nessa data → refaz
+  uma vez; se insistir, confirma pelo evento criado no turno (`confirmacaoDoEvento`) ou pede o dia. Serviço
+  restrito (invertida = Ibiporã): afirmou o serviço na unidade proibida → refaz, se insistir tira a frase;
+  ofereceu horário lá sem avisar → acrescenta o `aviso_texto`. Regex da config: ≤ 200 caracteres, sem
+  quantificador aninhado. Veredito em `guard_shadow_logs` (`unidade_data_*`, `servico_unidade_*`). Testes:
+  `trava-unidade.test.ts` e `trava-unidade.codex.test.ts` (revisão independente). Simulação nos 1.818 turnos
+  reais de 30 dias: `npx tsx scripts/replay-trava-unidade.ts turnos.json config.json` (data × unidade 0,
+  serviço 75: 2 contradições reais e 73 ofertas em Londrina sem aviso).
 - **Recusa × objeção** (`src/agents/objecao.ts`, `9cdc7d3`): "não quero", "não tenho interesse" e
   "não, obrigada" são recusa (acolhe, não insiste, porta aberta uma vez). "Tá caro" e "é longe" continuam
   objeção.

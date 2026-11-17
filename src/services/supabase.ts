@@ -740,22 +740,25 @@ export async function getEnxergaAtendente(agentId: string): Promise<boolean> {
 
 /**
  * `agents.prompt_config.trava_unidade` (agents/trava-unidade.ts, 17/11/2026). Ausente ou inválida = null
- * (trava desligada). Falha de leitura = null: a trava nunca cala o agente.
+ * (trava desligada). Cache de 5 min (KB_OPCOES_TTL_MS). Falha de leitura (erro do Supabase ou exceção)
+ * mantém o último valor lido em vez de desligar a trava, e não é guardada no cache: a próxima chamada tenta
+ * de novo. Sem valor anterior, a trava fica desligada nesse turno (nunca cala o agente).
  */
 const travaUnidadeCache = new Map<string, { em: number; valor: TravaUnidadeConfig | null }>();
 
 export async function getTravaUnidade(agentId: string): Promise<TravaUnidadeConfig | null> {
   const cache = travaUnidadeCache.get(agentId);
   if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.valor;
-  let valor: TravaUnidadeConfig | null = null;
   try {
-    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
-    valor = lerConfigTravaUnidade((ag?.prompt_config as { trava_unidade?: unknown } | null)?.trava_unidade);
+    const { data: ag, error } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    if (error) throw new Error(error.message);
+    const valor = lerConfigTravaUnidade((ag?.prompt_config as { trava_unidade?: unknown } | null)?.trava_unidade);
+    travaUnidadeCache.set(agentId, { em: Date.now(), valor });
+    return valor;
   } catch (err) {
-    console.error('[TravaUnidade] prompt_config não lido, sem trava:', err instanceof Error ? err.message : String(err));
+    console.error('[TravaUnidade] prompt_config não lido, usando o último valor:', err instanceof Error ? err.message : String(err));
+    return cache?.valor ?? null;
   }
-  travaUnidadeCache.set(agentId, { em: Date.now(), valor });
-  return valor;
 }
 
 // ── Modelo do Executor por agente ─────────────────────────────

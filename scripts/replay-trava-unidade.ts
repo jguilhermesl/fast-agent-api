@@ -41,8 +41,8 @@ for (const l of linhas) {
   }
   if (s.length) {
     servico++;
-    console.log(`\nSERVIÇO ${l.created_at.slice(0, 16)} conv ${l.conversation_id.slice(0, 8)} | cliente: ${(l.ult_user ?? '').replace(/\n/g, ' ').slice(0, 90)}`);
-    console.log('   ' + msgs.join(' ⏎ ').replace(/\n/g, ' ').slice(0, 300));
+    console.log(`\nSERVIÇO[${s.map((x) => x.tipo).join('/')}] ${l.created_at.slice(0, 16)} conv ${l.conversation_id.slice(0, 8)} | cliente: ${(l.ult_user ?? '').replace(/\n/g, ' ').slice(0, 90)}`);
+    console.log('   ' + msgs.join(' ⏎ ').replace(/\n/g, ' '));
   }
 }
 console.log(`\nTURNOS ${linhas.length} · com agenda no turno ${comAgenda} · data×unidade ${dataUnidade} · serviço ${servico}`);
