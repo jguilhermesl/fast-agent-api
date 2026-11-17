@@ -109,9 +109,11 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   em turno de texto, e quando a fala do turno (`client_messages`) é só a sequência, sem mais nada. Mesma pausa, mesmo
   log e mesmo `LOOP_ROBO_MODE`. Não pausa de propósito: uma automática sozinha, duas de uma vez sem resposta nossa no
   meio (paciente encaminha cobrança), a mesma pergunta longa colada 3 ou 4 vezes, e quem cita o menu para pedir ajuda
-  ("tentei", "apareceu", "vocês", "pra mim": `FALA_DE_GENTE`; em mensagem com itens numerados tudo é decidido pelo
-  texto fora dos itens). Três passadas de revisão independente do Codex no mesmo dia acharam 11 defeitos (5 calavam
-  gente em sequências montadas, nenhum visto em produção); cada um virou teste. Limite conhecido: a mesma mensagem
+  ("tentei", "apareceu", "vocês", "pra mim": `FALA_DE_GENTE`; só no menu com cabeçalho de instrução fora dos itens
+  numerados é que a fala de gente dentro do item não conta, porque menu escreve opção na primeira pessoa). Lista
+  numerada sozinha não é sinal de robô. A fala do turno tem de ser igual às últimas mensagens da sequência, coladas.
+  Quatro passadas de revisão independente do Codex no mesmo dia acharam 14 defeitos (7 calavam gente em sequências
+  de teste, nenhum visto em produção); cada um virou teste. Limite conhecido: a mesma mensagem
   de 60+ caracteres 5 vezes seguidas, com resposta nossa no meio, pausa mesmo sendo gente (em 30 dias ninguém passou
   de 2). Ligação coberta em `orchestrator.robo.test.ts`.
   Simulado em 30 dias com o código (42.802 textos recebidos): 6 conversas, todas robô (B4, Claro, Shopee, 3 menus);

@@ -41,6 +41,9 @@ describe('pareceMensagemAutomatica', () => {
     // 2ª revisão do Codex: menu com opção escrita na primeira pessoa continua sendo robô.
     'Escolha uma das opções:\n1 - Recebi uma cobrança\n2 - Meu pedido não chegou\nProtocolo: 900000',
     'Escolha uma das opções: 1 - Recebi uma cobrança 2 - O que faço para cancelar',
+    // 4ª revisão do Codex: menu com a instrução dentro do item ou depois dos itens.
+    '1 - Digite 1 para agendar\n2 - Digite 2 para resultados',
+    '1 - Agendamento 2 - Resultados. Digite uma das opções acima.',
   ])('robô: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(true));
 
   it.each([
@@ -78,7 +81,11 @@ describe('pareceMensagemAutomatica', () => {
     // 3ª revisão do Codex: lista numerada escrita pela pessoa, com a frase de robô dentro do item.
     '1 - Recebi essa mensagem: Digite menu para continuar\n2 - Vocês conseguem marcar minha consulta?',
     '1 - Apareceu: Escolha uma das opções\n2 - Me ajudem a cancelar minha consulta',
-    '1 - Digite menu para continuar\n2 - Escolha uma das opções',
+    // 4ª revisão do Codex: paciente que numera as perguntas; lista numerada sozinha não é sinal de robô.
+    'Meu plano é Bradesco.\n1 - Vocês atendem cardiologia?\n2 - Preciso agendar para amanhã.',
+    'Bradesco Saúde:\n1 - Vocês aceitam meu plano?\n2 - Podem marcar a consulta?',
+    'Meu plano é Bradesco.\n1 - Atendem cardiologia?\n2 - Preciso agendar para amanhã.',
+    'Escolha a opção que for melhor pra mim: 1- segunda 2- terça',
     // 3ª revisão do Codex: pedido de gente depois de 6 mil caracteres de texto encaminhado.
     'Digite menu para continuar\n' + 'Detalhes da cobrança. '.repeat(300) + '\nVocês podem verificar esta cobrança?',
     'Escolha uma das opções\n' + 'Detalhes da consulta. '.repeat(300) + '\nTentei agendar, podem me ajudar?',

@@ -156,36 +156,33 @@ export function decidirRoboNoRabo(
   const textoDe = (i: number): string => (msgs[i].message_type === 'text' ? normalizarTexto(msgs[i].content ?? '') : '');
   // Pingue-pongue provado (saída nossa depois da mais velha da sequência) ou sequência longa demais para ser gente.
   const comprovada = (tamanho: number): boolean => ultimaSaida > recebidas[tamanho - 1] || tamanho >= SEQUENCIA_SEM_DUVIDA;
-  // A fala do turno tem de ser SÓ a sequência (uma ou mais mensagens dela, que o n8n junta com
-  // quebra de linha). Conter a sequência não basta: num lote "texto do robô + pedido de gente" com
-  // a leitura do banco atrasada, o pedido ficaria sem resposta (2ª revisão do Codex, 17/11/2026).
+  // A fala do turno tem de ser SÓ o fim da sequência (as últimas mensagens dela, que o n8n junta
+  // com quebra de linha). Conter a sequência não basta: num lote "texto do robô + pedido de gente"
+  // com a leitura do banco atrasada, o pedido ficaria sem resposta (2ª revisão do Codex, 17/11/2026).
   const turno = normalizarTexto(textoDoTurno ?? '');
+  // `textos` vem da mais nova para a mais velha. O lote do n8n são as últimas mensagens recebidas,
+  // na ordem: a fala do turno tem de ser igual às k últimas da sequência, coladas. Comparação
+  // exata e barata (no máximo 40 colagens); as versões que procuravam pedaços dentro do texto
+  // erravam com texto sobreposto ou custavam segundos de CPU em texto montado (revisões do Codex).
   const turnoSoRepete = (textos: string[]): boolean => {
     if (!turno) return false;
-    const unicos = [...new Set(textos)].filter((t) => t.length > 0);
-    // Dá para montar a fala inteira só com textos da sequência, um depois do outro? (`chega[i]` =
-    // dá para chegar até a posição i.) Tirar pedaços do texto na ordem errada errava quando um
-    // texto era começo de outro.
-    const chega = new Array<boolean>(turno.length + 1).fill(false);
-    chega[0] = true;
-    for (let i = 0; i < turno.length; i++) {
-      if (!chega[i]) continue;
-      const inicios = turno[i] === ' ' ? [i, i + 1] : [i];
-      for (const ini of inicios) {
-        for (const t of unicos) if (turno.startsWith(t, ini)) chega[ini + t.length] = true;
-      }
+    let colado = '';
+    for (const t of textos) {
+      colado = colado ? `${t} ${colado}` : t;
+      if (colado.length > turno.length) return false;
+      if (colado === turno) return true;
     }
-    return chega[turno.length];
+    return false;
   };
 
   const alvo = textoDe(recebidas[0]);
-  if (alvo.length >= ECO_MIN_CARACTERES && turnoSoRepete([alvo])) {
+  if (alvo.length >= ECO_MIN_CARACTERES) {
     let iguais = 0;
     for (const i of recebidas) {
       if (textoDe(i) !== alvo) break;
       iguais++;
     }
-    if (iguais >= ECO_MIN_REPETICOES && comprovada(iguais)) {
+    if (iguais >= ECO_MIN_REPETICOES && comprovada(iguais) && turnoSoRepete(new Array<string>(iguais).fill(alvo))) {
       return { loop: true, textos: iguais, distintos: 1, regra: 'eco' };
     }
   }

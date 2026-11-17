@@ -72,8 +72,9 @@ const FRACOS = [
 /**
  * Itens de menu numerados ("*[ 1 ]* - Já sou cliente", "1 - Financeiro", "2) Suporte", ou o número em tecla de emoji),
  * em linhas ou na mesma linha. Só conta quando aparecem o 1 e o 2: quem responde um questionário
- * ("2- sim 3- não") ou lista telefones ("(81) 9...") não começa do 1 seguido de texto. Sinal fraco:
- * paciente também numera exames ("1. hemograma 2. glicemia").
+ * ("2- sim 3- não") ou lista telefones ("(81) 9...") não começa do 1 seguido de texto. Sozinho não
+ * é sinal de robô (paciente numera exames e perguntas): só vale junto de um cabeçalho de menu,
+ * ver `pareceMensagemAutomatica`.
  */
 // Repetições com teto ({0,3}): com `*` em classes vizinhas, "1" seguido de 32 mil espaços levava 2,9 s
 // de CPU (retrocesso quadrático, achado na revisão do Codex de 17/11/2026).
@@ -90,10 +91,6 @@ export function temOpcoesNumeradas(mensagem: string): boolean {
  * inválida, digite somente o número'. O que faço?", "Recebi essa mensagem, é de vocês?". Empresa
  * fala "você" com o cliente; quem fala "vocês", "pra mim" e "tentei" é a pessoa. Ficou de fora
  * "não consegui/não entendi", que robô de menu também diz.
- *
- * Só vale para o texto FORA dos itens numerados: menu de empresa escreve opção na primeira pessoa
- * ("1 - Recebi uma cobrança", "2 - O que faço para cancelar"), e com o veto no texto inteiro esse
- * robô nunca mais seria reconhecido (2ª revisão do Codex: 300 turnos em 50 h sem pausa).
  */
 const FALA_DE_GENTE = /\b(tentei|apareceu|aparecendo|recebi\s+(ess[ae]|est[ae]|isso|uma?)|mandaram|o\s+que\s+(eu\s+)?(fa[cç]o|devo\s+fazer)|voc[eê]s|pra\s+mim|me\s+ajud[ae]m?)\b/i;
 const INICIO_DE_ITEM = new RegExp(ITEM_DE_MENU.source);
@@ -112,21 +109,39 @@ function foraDosItens(mensagem: string): string {
 /** Mensagem do WhatsApp vai até ~65 mil caracteres; a cara de robô está no começo. Teto para nenhum regex custar caro. */
 const MAX_CARACTERES = 6000;
 
+/** Cabeçalho que pede uma escolha: junto de itens numerados, é menu ("escolha a opção que melhor descreve...", pesquisa de satisfação). */
+const PEDE_ESCOLHA = [
+  /\b(escolha|selecione)\s+(a\s+op[cç][aã]o|uma\s+op[cç][aã]o|qual|o\s+(n[uú]mero|servi[cç]o|setor|assunto))\b/i,
+  /\bcomo\s+voc[eê]\s+avalia\b/i,
+];
+
 /**
- * Em mensagem com menu numerado, tudo é decidido pelo texto FORA dos itens. No menu de empresa a
- * instrução ("Escolha uma das opções:", "Digite o número") fica no cabeçalho e os itens são só
- * rótulos; quando é a pessoa que numera ("1 - Recebi essa mensagem: Digite menu\n2 - Vocês
- * conseguem marcar?"), a frase de robô está dentro do item e não conta (3ª revisão do Codex).
+ * Ordem da decisão (reescrita depois de quatro passadas de revisão do Codex em 17/11/2026, que
+ * foram derrubando remendos):
  *
- * A fala de gente é procurada no texto inteiro, não só nos 6 mil primeiros caracteres: pedido no
- * fim de uma mensagem enorme encaminhada continua valendo.
+ * 1. Menu com cabeçalho: itens numerados (1 e 2) e, FORA dos itens, uma instrução de menu. É o
+ *    menu de empresa. Aqui a fala de gente só conta se estiver no cabeçalho ("Tentei agendar e
+ *    apareceu: escolha uma das opções 1 - ... 2 - ..."), porque o menu escreve opção na primeira
+ *    pessoa ("1 - Recebi uma cobrança").
+ * 2. Em qualquer outra mensagem, fala de gente em qualquer lugar do texto inteiro (não só nos 6 mil
+ *    primeiros caracteres) decide que não é robô: paciente que numera as perguntas ("1 - Vocês
+ *    atendem cardiologia?"), que cita o menu, ou que pede ajuda no fim de um texto encaminhado.
+ * 3. Sem fala de gente: um sinal forte, ou dois fracos. Lista numerada sozinha não é sinal: paciente
+ *    numera exame e pergunta, e "Bradesco" + lista numerada virava robô.
  */
 export function pareceMensagemAutomatica(mensagem: string): boolean {
   const inteiro = String(mensagem ?? '');
-  const numeradas = temOpcoesNumeradas(inteiro);
-  const base = numeradas ? foraDosItens(inteiro) : inteiro;
-  if (FALA_DE_GENTE.test(base)) return false;
-  const m = base.slice(0, MAX_CARACTERES);
+  const m = inteiro.slice(0, MAX_CARACTERES);
+
+  if (temOpcoesNumeradas(inteiro)) {
+    const cabecalho = foraDosItens(inteiro);
+    const inicio = cabecalho.slice(0, MAX_CARACTERES);
+    if (FORTES.some((r) => r.test(inicio)) || PEDE_ESCOLHA.some((r) => r.test(inicio))) {
+      return !FALA_DE_GENTE.test(cabecalho);
+    }
+  }
+
+  if (FALA_DE_GENTE.test(inteiro)) return false;
   if (FORTES.some((r) => r.test(m))) return true;
-  return FRACOS.filter((r) => r.test(m)).length + (numeradas ? 1 : 0) >= 2;
+  return FRACOS.filter((r) => r.test(m)).length >= 2;
 }

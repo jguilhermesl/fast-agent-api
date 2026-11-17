@@ -238,13 +238,33 @@ describe('robô reconhecido pelo rabo da conversa (card #1223)', () => {
       expect(decidir([cliente(L1), ia('Como posso ajudar?'), cliente(L2)]).loop).toBe(false);
     });
 
-    it('3ª revisão do Codex: lote só de automáticas em que um texto é começo de outro continua pausando', () => {
+    it('a fala do turno tem de ser o fim da sequência: as últimas mensagens dela, coladas na ordem', () => {
       const A = 'Digite menu para continuar';
       const B = `${A}\nDigite menu`;
       const C = 'Digite menu para falar com atendente';
       const linha = [cliente(A), ia(), cliente(B), ia(), cliente(C)];
-      expect(decidir(linha, `${A}\n${C}`)).toMatchObject({ loop: true, regra: 'automaticas', textos: 3 });
-      expect(decidir(linha, `${A}\n${C} por favor`).loop).toBe(false);
+      expect(decidir(linha, C)).toMatchObject({ loop: true, regra: 'automaticas', textos: 3 });
+      expect(decidir(linha, `${B}\n${C}`).loop).toBe(true);
+      expect(decidir(linha, `  ${B.toUpperCase()}\n\n${C}  `).loop).toBe(true);
+      // Não é o fim da sequência (A já foi respondida em outro turno) ou tem texto a mais: o turno segue.
+      expect(decidir(linha, `${A}\n${C}`).loop).toBe(false);
+      expect(decidir(linha, `${C} por favor`).loop).toBe(false);
+      expect(decidir(linha, 'Digite menu').loop).toBe(false);
+    });
+
+    it('4ª revisão do Codex: paciente que numera as perguntas e cita o plano não é robô', () => {
+      const P1 = 'Meu plano é Bradesco.\n1 - Vocês atendem cardiologia?\n2 - Preciso agendar para amanhã.';
+      const P2 = 'Bradesco Saúde:\n1 - Vocês aceitam meu plano?\n2 - Podem marcar a consulta?';
+      expect(decidir([cliente(P1), ia('Como posso ajudar?'), cliente(P2)]).loop).toBe(false);
+    });
+
+    it('4ª revisão do Codex: texto montado com 38 prefixos longos não custa segundos de CPU', () => {
+      const S = 'Digite menu ';
+      const K = Math.floor(65_000 / S.length);
+      const linha = [cliente(S.trim()), ia(), ...Array.from({ length: 38 }, (_, i) => cliente(S.repeat(Math.floor(K * (0.5 + i * 0.012))).trim()))];
+      const inicio = performance.now();
+      decidir(linha, S.repeat(K).trim());
+      expect(performance.now() - inicio).toBeLessThan(500);
     });
 
     it('mensagem de sistema no meio não muda a decisão', () => {
