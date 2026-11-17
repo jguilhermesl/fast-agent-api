@@ -81,6 +81,8 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function regexSegura(p: unknown): p is string {
   if (typeof p !== 'string' || !p.trim() || p.length > 200) return false;
   if (!/^[\p{L}\p{N} |()?-]+$/u.test(p)) return false;
+  // "?" em sequência ("k?k?k?…kkk") também explode; com no máximo 5 opcionais o pior caso é 2^5 tentativas.
+  if ((p.match(/\?/g) ?? []).length > 5) return false;
   try {
     new RegExp(p, 'i');
     return true;
@@ -162,20 +164,29 @@ const RE_FAIXA = /\b(?:das|de)\s+\d{1,2}(?:h\d{0,2}|:\d{2})?\s*(?:as|a|ate|-)\s*
  * "indisponível", "não em Londrina"). "Não tem estacionamento", "não tenho Pix", "não esqueça a roupa" não
  * negam a oferta (achados do Codex, 17/11). "Fechado" fica de fora: "Fechado, tá marcado" é confirmação.
  */
-const OBJ = '(?:vaga|vagas|horario|horarios|hora|livre|agenda|disponibilidade|atendimento|mais vaga|mais horario|nada|como|a mesa|mesa)';
+// Objeto de indisponibilidade: vaga, horário, data, dia da semana, a mesa. "Não tem como errar o endereço" e
+// "não tem nada demais" não negam (revisão 3, 17/11).
+const OBJ =
+  '(?:vagas?|horarios?|hora|livre|agenda|disponibilidade|atendimento|a mesa|mesa|\\d|esse dia|nesse dia|dia|segunda|terca|quarta|quinta|sexta|sabado|domingo|hoje|amanha)';
 const RE_NEGA = new RegExp(
   [
     `\\bnao (?:atendo|atende|abre|abro|abriu|trabalho|funciona|faco|fazemos|estou|vou estar|apareceu|aparece|sobrou)\\b`,
-    `\\bnao (?:tem|tenho|ha|temos|consigo|encontrei|achei)(?: mais)? ${OBJ}\\b`,
+    `\\bnao (?:tem|tenho|ha|temos|consigo|encontrei|achei)(?: mais)? ${OBJ}`,
+    // "Em Londrina a invertida não tem, só em Ibiporã": "não tem" fechando a oração.
+    `\\bnao (?:tem|temos|faco|fazemos)\\s*(?:[,.;!?]|$)`,
     `\\bnao consigo (?:te )?(?:encaixar|atender|marcar|agendar)\\b`,
-    `\\bnao (?:e )?(?:em|na|no|la em|aqui em)\\s`,
+    `\\bnao (?:vai dar|da|rola)\\b`,
     `\\bsem (?:horario|vaga|a mesa)\\b`,
     `\\bindisponive`,
     `\\bnenhum`,
     `\\blotad`,
     `\\bocupad`,
+    `\\bchei[oa]\\b`,
+    `\\besgotad`,
   ].join('|'),
 );
+/** "não em Ibiporã" nega só a cidade logo depois dele (não a anterior: "19/11 em Londrina, não em Ibiporã"). */
+const RE_NEGA_PREFIXO = /\bnao (?:e )?(?:em|na|no|la em|aqui em)\s*$/;
 
 /** Apaga (com espaços, mantendo posições) as faixas de horário de expediente. */
 const semFaixas = (n: string) => n.replace(RE_FAIXA, (m) => ' '.repeat(m.length));
@@ -193,8 +204,12 @@ const posicoes = (n: string, re: RegExp): Array<Posicao & { m: RegExpMatchArray 
  * Ibiporã.
  */
 function negada(n: string, u: Posicao, outras: Posicao[] = []): boolean {
-  const antes = outras.filter((o) => o.fim <= u.pos).reduce((a, o) => Math.max(a, o.fim), 0);
+  // Antes da cidade, a janela também para na última vírgula/";": "Em Ibiporã não tem vaga, em Londrina faço…"
+  // não nega Londrina.
+  const virgula = Math.max(n.lastIndexOf(',', u.pos), n.lastIndexOf(';', u.pos));
+  const antes = Math.max(virgula + 1, outras.filter((o) => o.fim <= u.pos).reduce((a, o) => Math.max(a, o.fim), 0));
   const depois = outras.filter((o) => o.pos >= u.fim).reduce((a, o) => Math.min(a, o.pos), n.length);
+  if (RE_NEGA_PREFIXO.test(n.slice(Math.max(0, u.pos - 20), u.pos))) return true;
   return RE_NEGA.test(n.slice(Math.max(antes, u.pos - 30), Math.min(depois, u.fim + 40)));
 }
 
@@ -218,7 +233,8 @@ export interface ParDataUnidade {
  * Trechos de oferta dentro da frase: ";", " ou " e ", em <algo>" separam ofertas. "às 18h em Londrina; em
  * Ibiporã, a opção é 05/11" são duas ofertas (falso positivo real de 04/11 sem esta divisão).
  */
-const trechosDaFrase = (n: string): string[] => n.split(/;|\s+ou\s+|,\s+(?=em\s)/).map((t) => t.trim()).filter(Boolean);
+const trechosDaFrase = (n: string): string[] =>
+  n.split(/;|\s+ou\s+|,\s+(?=em\s)|\s+e\s+(?=em\s)/).map((t) => t.trim()).filter(Boolean);
 
 /**
  * Pares data → unidade escritos no texto. Dentro de cada trecho:
@@ -318,19 +334,24 @@ export function checarDataUnidade(mensagens: string[], agenda: MapaAgenda, unida
   return out;
 }
 
-/** Orações da frase: separadas por vírgula, ";", " ou " e " mas ". "Em Londrina," curto junta com a seguinte. */
+/**
+ * Orações da frase para a contradição: separadas por ";", " ou ", " mas " e " e (também)". A vírgula NÃO
+ * separa: "Em Londrina, quarta, 18/11, às 13h, faço a invertida" é uma oração só (revisão 3, 17/11).
+ */
 function oracoes(n: string): string[] {
-  const partes = n.split(/[,;]|\s+ou\s+|\s+mas\s+/).map((x) => x.trim()).filter(Boolean);
+  const partes = n.split(/;|\s+ou\s+|,?\s+mas\s+|,?\s+e\s+(?=tambem\b)|,\s+e\s+|,\s+(?=em\s)/).map((x) => x.trim()).filter(Boolean);
+  // "em Londrina" sozinho (", em Londrina." no fim) volta para a oração anterior: "Faço a invertida também, em Londrina".
   const out: string[] = [];
-  for (let i = 0; i < partes.length; i++) {
-    if (/^(?:em|la em|aqui em|no|na)\s+\S+$/.test(partes[i]) && i + 1 < partes.length) {
-      partes[i + 1] = `${partes[i]} ${partes[i + 1]}`;
-      continue;
-    }
-    out.push(partes[i]);
+  for (const p of partes) {
+    const curta = p.replace(/[.!?]+$/, '').trim();
+    if (out.length && /^(?:em|la em|aqui em|no|na)\s+\p{L}+(?:\s+\p{L}+)?$/u.test(curta)) out[out.length - 1] += ` ${curta}`;
+    else out.push(p);
   }
   return out;
 }
+
+/** Verbo de fazer o serviço: com "também" e cidade proibida, numa frase que fala do serviço, é contradição. */
+const RE_FAZ_SERVICO = /\b(?:faco|fazemos|faz|aplico|aplicamos|tenho a mesa|tem a mesa|temos a mesa)\b/;
 
 /**
  * Checagem 2: serviço restrito em pauta. Devolve `contradicao` (alguma oração afirma o serviço na unidade
@@ -369,14 +390,25 @@ export function checarServico(input: {
       const ups = cidades.filter((c) => !permitidas.has(c.m[1]));
       if (!ups.length) continue;
       if (avisoValido(f.n)) avisou = true;
-      // Contradição por oração: a oração tem a unidade proibida (não negada) e o serviço, ou diz "também"
-      // numa frase que fala do serviço ("A invertida é só em Ibiporã, mas faço também em Londrina").
+      // Contradição: na MESMA oração, o serviço e a unidade proibida não negada ("faço a invertida em
+      // Londrina", "faço a invertida também, em Londrina"). Oração sem cidade e com "lá" fala da última cidade
+      // citada antes na frase ("Em Londrina não tem vaga hoje, mas faço a invertida lá amanhã").
+      let ultimaCidade: string | null = null;
       for (const o of oracoes(f.n)) {
         const cid = posicoes(o, reTodas);
-        const proibNaOracao = cid.filter((c) => !permitidas.has(c.m[1]));
-        if (!proibNaOracao.length) continue;
-        if (proibNaOracao.every((u) => negada(o, u, cid.filter((x) => x.pos !== u.pos)))) continue;
-        if (gatilho.test(o) || (/\btambem\b/.test(o) && gatilho.test(f.n))) contradicao = true;
+        const proib = cid.filter((c) => !permitidas.has(c.m[1]));
+        const proibAfirmada = proib.some((u) => !negada(o, u, cid.filter((x) => x.pos !== u.pos)));
+        if (gatilho.test(o)) {
+          if (cid.length) {
+            if (proibAfirmada) contradicao = true;
+          } else if (ultimaCidade && !permitidas.has(ultimaCidade) && /\bla\b/.test(o) && !RE_NEGA.test(o)) {
+            contradicao = true;
+          }
+        } else if (proibAfirmada && /\btambem\b/.test(o) && RE_FAZ_SERVICO.test(o) && gatilho.test(f.n)) {
+          // "A invertida é só em Ibiporã, mas agora faço também em Londrina" (oferta de horário com "também" não conta).
+          contradicao = true;
+        }
+        if (cid.length) ultimaCidade = cid[cid.length - 1].m[1];
       }
       // Oferta: unidade proibida não negada, com data ou hora na frase.
       const n = semFaixas(f.n);
@@ -464,7 +496,11 @@ const SEMANA: Record<string, string> = {
   sábado: 'sábado',
 };
 const FALHOU = (r: Record<string, unknown>) =>
-  r.success === false || r.ok === false || (typeof r.status === 'string' && /^(error|erro|cancel|fail|falh)/i.test(r.status));
+  r.success === false ||
+  r.ok === false ||
+  Boolean(r.error) ||
+  Boolean(r.erro) ||
+  (typeof r.status === 'string' && /^(error|erro|cancel|fail|falh)/i.test(r.status));
 
 /**
  * Confirmação feita a partir do evento que a ferramenta de criação/atualização devolveu NESTE turno, no fuso
