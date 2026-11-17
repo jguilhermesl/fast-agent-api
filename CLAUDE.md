@@ -102,12 +102,17 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   **Reconhecimento pelo rabo da conversa** (17/11/2026, card #1223, Duda x menu da B4 Telecom: 17 respostas em 10 min,
   US$ 0,68; a repetição não via porque a pessoa da empresa tinha conversado na mesma hora). Se a repetição não pegou,
   `decidirRoboNoRabo` olha as últimas 40 mensagens de 24 h (a leitura do bloco do atendente, sem consulta nova):
-  `regra=eco` = as 3 últimas recebidas são o mesmo texto de 60+ caracteres e já respondemos depois da primeira;
-  `regra=automaticas` = as 2 últimas recebidas têm cara de mensagem automática (`mensagem-automatica.ts`, que agora
-  conhece menu de opções, "opção não encontrada", boas-vindas de central, fim de atendimento com protocolo e pesquisa
-  de satisfação) e nenhuma fala de gente ficou sem resposta. Mesma pausa, mesmo log e mesmo `LOOP_ROBO_MODE`. Uma
-  mensagem automática sozinha nunca pausa (paciente encaminha cobrança para perguntar). Simulado em 30 dias com o
-  código: 7 conversas, todas robô (B4, Claro, Vivo, Shopee, 3 menus); B4 cai de 17 respostas para 1.
+  `regra=eco` = as 5 últimas recebidas são o mesmo texto de 60+ caracteres; `regra=automaticas` = as 2 últimas
+  recebidas têm cara de mensagem automática (`mensagem-automatica.ts`, que agora conhece menu de opções, "opção não
+  encontrada", boas-vindas de central, fim de atendimento com protocolo e pesquisa de satisfação). As duas só valem
+  com pingue-pongue provado (já mandamos algo depois da primeira da sequência e voltou a mesma coisa; ou 10+ seguidas),
+  em turno de texto, e com a fala do turno (`client_messages`) batendo com a sequência. Mesma pausa, mesmo log e mesmo
+  `LOOP_ROBO_MODE`. Não pausa de propósito: uma automática sozinha, duas de uma vez sem resposta nossa no meio
+  (paciente encaminha cobrança), a mesma pergunta longa colada 3 ou 4 vezes, e quem cita o menu para pedir ajuda
+  ("tentei", "apareceu", "vocês", "pra mim": `FALA_DE_GENTE`). Revisão independente do Codex no mesmo dia achou 5
+  defeitos na 1ª versão (2 calavam gente); cada um virou teste. Ligação coberta em `orchestrator.robo.test.ts`.
+  Simulado em 30 dias com o código (42.802 textos recebidos): 6 conversas, todas robô (B4, Claro, Shopee, 3 menus);
+  B4 cai de 17 respostas para 1; Claro pausa na 5ª mensagem, não na 24ª.
 - **Pergunta repetida** (`src/agents/pergunta-repetida.ts`, 29/10/2026): com `prompt_config.nao_repetir_pergunta: true`
   (só a Canda), se a resposta traz pergunta ("…?") igual ou quase igual (Jaccard ≥ 0,7 das palavras, ou a curta
   contida na longa) a uma das últimas 4 falas da agente no histórico, o orquestrador refaz a resposta UMA vez, sem
