@@ -94,6 +94,15 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   **Loop lento** (17/11/2026, Diana x robô da Claro: ~5 msgs/h por 5 dias, US$ 4,60): mesma consulta, agora de 24 h
   (limite 200); a regra da hora olha só a última hora, e se não pegar vale: 24+ textos em 24 h com até 2 diferentes
   (`regra=lento`). Simulado em 30 dias: só a Diana/Claro; nenhum humano teve 6 textos com até 3 diferentes num dia.
+  **Reconhecimento pelo rabo da conversa** (17/11/2026, card #1223, Duda x menu da B4 Telecom: 17 respostas em 10 min,
+  US$ 0,68; a repetição não via porque a pessoa da empresa tinha conversado na mesma hora). Se a repetição não pegou,
+  `decidirRoboNoRabo` olha as últimas 40 mensagens de 24 h (a leitura do bloco do atendente, sem consulta nova):
+  `regra=eco` = as 3 últimas recebidas são o mesmo texto de 60+ caracteres e já respondemos depois da primeira;
+  `regra=automaticas` = as 2 últimas recebidas têm cara de mensagem automática (`mensagem-automatica.ts`, que agora
+  conhece menu de opções, "opção não encontrada", boas-vindas de central, fim de atendimento com protocolo e pesquisa
+  de satisfação) e nenhuma fala de gente ficou sem resposta. Mesma pausa, mesmo log e mesmo `LOOP_ROBO_MODE`. Uma
+  mensagem automática sozinha nunca pausa (paciente encaminha cobrança para perguntar). Simulado em 30 dias com o
+  código: 7 conversas, todas robô (B4, Claro, Vivo, Shopee, 3 menus); B4 cai de 17 respostas para 1.
 - **Pergunta repetida** (`src/agents/pergunta-repetida.ts`, 29/10/2026): com `prompt_config.nao_repetir_pergunta: true`
   (só a Canda), se a resposta traz pergunta ("…?") igual ou quase igual (Jaccard ≥ 0,7 das palavras, ou a curta
   contida na longa) a uma das últimas 4 falas da agente no histórico, o orquestrador refaz a resposta UMA vez, sem

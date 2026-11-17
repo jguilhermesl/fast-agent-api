@@ -25,6 +25,19 @@ describe('pareceMensagemAutomatica', () => {
     'velas e sabonetes artesanal agradece seu contato. Como podemos ajudar?',
     // 13/11/2026: encaminhamento automático de empresa para atendente.
     'Vamos te direcionar para um de nossos atendentes.\n• Horário de atendimento: segunda a sexta, das 9h às 18h( horário de Brasília, exceto feriados).\n• Se o contato ocorrer próximo ao fim do horário, o atendimento pode não ser concluído , nesse caso, fale conosco novamente no próximo dia útil.',
+    // 28/10/2026 (card #1223): atendimento automático da B4 Telecom, que a Duda respondeu 17 vezes.
+    'Atendimento finalizado, agradecemos o contato',
+    'Seja bem-vindo a central de atendimento da *B4 TELECOM*🚀🚀🚀\n\nPara iniciarmos seu atendimento, por favor me informe *seu nome*.',
+    'Seja bem-vindo a central de atendimento da *B4 TELECOM*🚀🚀🚀\n\nPara que eu possa lhe ajudar, escolha uma das opções abaixo pelo número correspondente:\n\n *[ 1 ]* - *Já sou cliente*\n *[ 2 ]* - *Não sou cliente*',
+    'Opção não encontrada, por favor, escolha uma das opções do menu (Digite somente o número da opção).\n                        \n *[ 1 ]* - *Já sou cliente*\n *[ 2 ]* - *Não sou cliente*',
+    // Outros menus de empresa dos mesmos 30 dias (Carol, Duda).
+    'Escolha uma das seguintes opções:\n*2* *-* 🔘 Agendamento\n*1* *-* 🩻 Resultado de exame\n*3* *-* ⁉️ Dúvidas e informações\nDigite #inicio para voltar ao menu principal',
+    'Olá LP SAÚDE RIO DOCE! Seja muito bem vindo (a) ao atendimento digital da *LP Benéficios*\nDigite o *número* da opção abaixo para o que deseja:\n*1* - Quero me tornar cliente\n*2* - Já sou cliente',
+    'Olá! Seja bem vindo ao atendimento Alvaro Apoio. 😊 Para seguirmos com seu atendimento, escolha a opção que melhor descreve sua relação com Alvaro Apoio: 1- Alvaro Apoio 2- Laboratório parceiro',
+    'Agora, por favor, selecione qual desses serviços melhor atende à sua necessidade: 1 - Conexão Alvaro Apoio 2 - Financeiro 3 - Assessoria Científica 4 - Encerrar',
+    'Eu não estou conseguindo entender sobre o quê você gostaria de conversar 🙁. Para ver todos os serviços oferecidos, digite a palavra *menu*',
+    'Atendimento finalizado com sucesso. Segue seu protocolo: 592239624.',
+    'Como você avalia o meu atendimento?\n*5* – *_Muito satisfeito_* 🤩\n*4* – *_Satisfeito_* 😍\n*3* – *_Neutro_* 😐\n*2* – *_Insatisfeito_* 🥺\n*1* – *_Muito insatisfeito_* 😔',
   ])('robô: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(true));
 
   it.each([
@@ -42,6 +55,17 @@ describe('pareceMensagemAutomatica', () => {
     'Vocês podem me ajudar? Agradeço o contato',
     'Qual o horário de atendimento: de manhã ou de tarde?',
     'Vocês abrem no sábado ou é exceto feriados?',
+    // Frases de gente que encostam nos sinais de menu (17/11/2026).
+    'Tentei marcar pelo site e deu opção inválida',
+    'O atendimento foi encerrado e eu não consegui marcar',
+    'Meu protocolo é 592239624, podem verificar?',
+    'Preciso desses exames:\n1. hemograma\n2. glicemia\n3. TSH',
+    'Qual vocês indicam? 1- ultrassom 2- ressonância',
+    'Protocolo:1293947 Bom dia. Sou a Valéria da Tem Saúde. Gostaria de agendar uma consulta com endocrinologia, por favor.',
+    'Nome : Ana Paula 996660818 18/11/76 49 anos\n2-R: sim, diabetes\n3- R - asmática\n4- não\n5-sim',
+    'Remarcar terça quinta ou sábado (81) 9379-8103 (81) 98647-0542 (81) 9440-8751',
+    'Pode escolher o melhor horário pra mim',
+    'Consulta dia 12/10 às 10:30 ou 1.500 de entrada?',
   ])('paciente: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(false));
 });
 

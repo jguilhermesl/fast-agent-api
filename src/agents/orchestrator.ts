@@ -35,7 +35,7 @@ import {
 } from '../services/supabase';
 import { cortarSeConversaNova } from '../memory/conversa';
 import { runExecutor } from './executor';
-import { decidirLoopRoboTurno, JANELA_LOOP_LENTO_MS, type DecisaoLoop } from './loop-robo';
+import { decidirLoopRoboTurno, decidirRoboNoRabo, JANELA_LOOP_LENTO_MS, type DecisaoLoop } from './loop-robo';
 import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
 import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
@@ -807,6 +807,8 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
 
   // Conversa já na equipe quando o turno começa (agents/atendente-assumiu.ts): não
   // chama LLM nem ferramenta. Guarda a fala do cliente, como a rajada faz.
+  // As últimas mensagens da conversa, lidas uma vez: servem aqui e na trava de robô logo abaixo.
+  let ultimasDaConversa: Awaited<ReturnType<typeof getUltimasMensagensDaConversa>> | null = null;
   if (config.atendenteNoInicioMode !== 'off' && ehConversaReal(req.conversation_id)) {
     let comAtendente = false;
     try {
@@ -817,6 +819,7 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         getEstadoDoLead(req.conversation_id),
         getUltimasMensagensDaConversa(req.conversation_id, new Date(agora - JANELA_TURNO_MS).toISOString()),
       ]);
+      ultimasDaConversa = ultimas;
       comAtendente = turnoComecaComAtendente(estado) || equipeFalouDepoisDoCliente(ultimas, agora);
     } catch (err) {
       console.error('[Atendente] leitura do lead falhou, turno segue:', err instanceof Error ? err.message : String(err));
@@ -835,11 +838,21 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
   // Robô do outro lado (agents/loop-robo.ts): a mesma resposta automática chegando sem
   // parar. Pausa antes de qualquer LLM e não grava no histórico; volta sozinho quando a
   // repetição sai da janela (1 h, ou 24 h no loop lento; uma consulta só). Falha de leitura = turno segue normal.
+  // Se a repetição não pegou, olha o rabo da conversa (menu de empresa, eco): `decidirRoboNoRabo`, com as
+  // últimas mensagens já lidas acima; se essa leitura faltar, só as regras de repetição valem.
   if (config.loopRoboMode !== 'off' && ehConversaReal(req.conversation_id)) {
     let decisao: DecisaoLoop | null = null;
     try {
-      const recebidas = await getMensagensRecebidasDesde(req.conversation_id, new Date(Date.now() - JANELA_LOOP_LENTO_MS).toISOString());
+      const desde = new Date(Date.now() - JANELA_LOOP_LENTO_MS).toISOString();
+      const [recebidas, linha] = await Promise.all([
+        getMensagensRecebidasDesde(req.conversation_id, desde),
+        ultimasDaConversa ?? getUltimasMensagensDaConversa(req.conversation_id, desde).catch(() => null),
+      ]);
       decisao = decidirLoopRoboTurno(recebidas);
+      if (!decisao.loop && linha) {
+        const rabo = decidirRoboNoRabo(linha, pareceMensagemAutomatica);
+        if (rabo.loop) decisao = rabo;
+      }
     } catch (err) {
       console.error('[LoopRobo] leitura das mensagens falhou, turno segue:', err instanceof Error ? err.message : String(err));
     }
