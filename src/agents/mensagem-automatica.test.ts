@@ -75,6 +75,13 @@ describe('pareceMensagemAutomatica', () => {
     'Recebi essa mensagem: Digite 1 para falar com o financeiro. É de vocês?',
     'Me mandaram isso: Seja bem-vindo a central de atendimento, escolha uma das opções. Como eu marco?',
     'Tentei agendar e apareceu: escolha uma das opções 1 - Já sou cliente 2 - Não sou cliente. O que faço?',
+    // 3ª revisão do Codex: lista numerada escrita pela pessoa, com a frase de robô dentro do item.
+    '1 - Recebi essa mensagem: Digite menu para continuar\n2 - Vocês conseguem marcar minha consulta?',
+    '1 - Apareceu: Escolha uma das opções\n2 - Me ajudem a cancelar minha consulta',
+    '1 - Digite menu para continuar\n2 - Escolha uma das opções',
+    // 3ª revisão do Codex: pedido de gente depois de 6 mil caracteres de texto encaminhado.
+    'Digite menu para continuar\n' + 'Detalhes da cobrança. '.repeat(300) + '\nVocês podem verificar esta cobrança?',
+    'Escolha uma das opções\n' + 'Detalhes da consulta. '.repeat(300) + '\nTentei agendar, podem me ajudar?',
   ])('paciente: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(false));
 
   it('2ª revisão do Codex: "https://" repetido 8 mil vezes e texto de 60 mil caracteres não travam a CPU', () => {

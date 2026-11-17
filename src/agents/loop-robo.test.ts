@@ -232,6 +232,21 @@ describe('robô reconhecido pelo rabo da conversa (card #1223)', () => {
       expect(decidir(linha, '').loop).toBe(false);
     });
 
+    it('3ª revisão do Codex: lista numerada escrita pela pessoa, citando o menu, não pausa', () => {
+      const L1 = '1 - Recebi essa mensagem: Digite menu para continuar\n2 - Vocês conseguem marcar minha consulta?';
+      const L2 = '1 - Apareceu: Escolha uma das opções\n2 - Me ajudem a cancelar minha consulta';
+      expect(decidir([cliente(L1), ia('Como posso ajudar?'), cliente(L2)]).loop).toBe(false);
+    });
+
+    it('3ª revisão do Codex: lote só de automáticas em que um texto é começo de outro continua pausando', () => {
+      const A = 'Digite menu para continuar';
+      const B = `${A}\nDigite menu`;
+      const C = 'Digite menu para falar com atendente';
+      const linha = [cliente(A), ia(), cliente(B), ia(), cliente(C)];
+      expect(decidir(linha, `${A}\n${C}`)).toMatchObject({ loop: true, regra: 'automaticas', textos: 3 });
+      expect(decidir(linha, `${A}\n${C} por favor`).loop).toBe(false);
+    });
+
     it('mensagem de sistema no meio não muda a decisão', () => {
       expect(decidir([...SABRINA, cliente(FINALIZADO), ia(), sistema(), cliente(BOAS_VINDAS)])).toMatchObject({ loop: true, regra: 'automaticas' });
     });

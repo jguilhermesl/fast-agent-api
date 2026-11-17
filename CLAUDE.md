@@ -106,11 +106,14 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   recebidas têm cara de mensagem automática (`mensagem-automatica.ts`, que agora conhece menu de opções, "opção não
   encontrada", boas-vindas de central, fim de atendimento com protocolo e pesquisa de satisfação). As duas só valem
   com pingue-pongue provado (já mandamos algo depois da primeira da sequência e voltou a mesma coisa; ou 10+ seguidas),
-  em turno de texto, e com a fala do turno (`client_messages`) batendo com a sequência. Mesma pausa, mesmo log e mesmo
-  `LOOP_ROBO_MODE`. Não pausa de propósito: uma automática sozinha, duas de uma vez sem resposta nossa no meio
-  (paciente encaminha cobrança), a mesma pergunta longa colada 3 ou 4 vezes, e quem cita o menu para pedir ajuda
-  ("tentei", "apareceu", "vocês", "pra mim": `FALA_DE_GENTE`). Revisão independente do Codex no mesmo dia achou 5
-  defeitos na 1ª versão (2 calavam gente); cada um virou teste. Ligação coberta em `orchestrator.robo.test.ts`.
+  em turno de texto, e quando a fala do turno (`client_messages`) é só a sequência, sem mais nada. Mesma pausa, mesmo
+  log e mesmo `LOOP_ROBO_MODE`. Não pausa de propósito: uma automática sozinha, duas de uma vez sem resposta nossa no
+  meio (paciente encaminha cobrança), a mesma pergunta longa colada 3 ou 4 vezes, e quem cita o menu para pedir ajuda
+  ("tentei", "apareceu", "vocês", "pra mim": `FALA_DE_GENTE`; em mensagem com itens numerados tudo é decidido pelo
+  texto fora dos itens). Três passadas de revisão independente do Codex no mesmo dia acharam 11 defeitos (5 calavam
+  gente em sequências montadas, nenhum visto em produção); cada um virou teste. Limite conhecido: a mesma mensagem
+  de 60+ caracteres 5 vezes seguidas, com resposta nossa no meio, pausa mesmo sendo gente (em 30 dias ninguém passou
+  de 2). Ligação coberta em `orchestrator.robo.test.ts`.
   Simulado em 30 dias com o código (42.802 textos recebidos): 6 conversas, todas robô (B4, Claro, Shopee, 3 menus);
   B4 cai de 17 respostas para 1; Claro pausa na 5ª mensagem, não na 24ª.
 - **Pergunta repetida** (`src/agents/pergunta-repetida.ts`, 29/10/2026): com `prompt_config.nao_repetir_pergunta: true`

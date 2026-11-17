@@ -162,9 +162,20 @@ export function decidirRoboNoRabo(
   const turno = normalizarTexto(textoDoTurno ?? '');
   const turnoSoRepete = (textos: string[]): boolean => {
     if (!turno) return false;
-    let resto = turno;
-    for (const t of [...new Set(textos)].sort((a, b) => b.length - a.length)) resto = resto.split(t).join(' ');
-    return resto.trim() === '';
+    const unicos = [...new Set(textos)].filter((t) => t.length > 0);
+    // Dá para montar a fala inteira só com textos da sequência, um depois do outro? (`chega[i]` =
+    // dá para chegar até a posição i.) Tirar pedaços do texto na ordem errada errava quando um
+    // texto era começo de outro.
+    const chega = new Array<boolean>(turno.length + 1).fill(false);
+    chega[0] = true;
+    for (let i = 0; i < turno.length; i++) {
+      if (!chega[i]) continue;
+      const inicios = turno[i] === ' ' ? [i, i + 1] : [i];
+      for (const ini of inicios) {
+        for (const t of unicos) if (turno.startsWith(t, ini)) chega[ini + t.length] = true;
+      }
+    }
+    return chega[turno.length];
   };
 
   const alvo = textoDe(recebidas[0]);

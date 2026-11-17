@@ -112,10 +112,21 @@ function foraDosItens(mensagem: string): string {
 /** Mensagem do WhatsApp vai até ~65 mil caracteres; a cara de robô está no começo. Teto para nenhum regex custar caro. */
 const MAX_CARACTERES = 6000;
 
+/**
+ * Em mensagem com menu numerado, tudo é decidido pelo texto FORA dos itens. No menu de empresa a
+ * instrução ("Escolha uma das opções:", "Digite o número") fica no cabeçalho e os itens são só
+ * rótulos; quando é a pessoa que numera ("1 - Recebi essa mensagem: Digite menu\n2 - Vocês
+ * conseguem marcar?"), a frase de robô está dentro do item e não conta (3ª revisão do Codex).
+ *
+ * A fala de gente é procurada no texto inteiro, não só nos 6 mil primeiros caracteres: pedido no
+ * fim de uma mensagem enorme encaminhada continua valendo.
+ */
 export function pareceMensagemAutomatica(mensagem: string): boolean {
-  const m = String(mensagem ?? '').slice(0, MAX_CARACTERES);
-  const numeradas = temOpcoesNumeradas(m);
-  if (FALA_DE_GENTE.test(numeradas ? foraDosItens(m) : m)) return false;
+  const inteiro = String(mensagem ?? '');
+  const numeradas = temOpcoesNumeradas(inteiro);
+  const base = numeradas ? foraDosItens(inteiro) : inteiro;
+  if (FALA_DE_GENTE.test(base)) return false;
+  const m = base.slice(0, MAX_CARACTERES);
   if (FORTES.some((r) => r.test(m))) return true;
   return FRACOS.filter((r) => r.test(m)).length + (numeradas ? 1 : 0) >= 2;
 }
