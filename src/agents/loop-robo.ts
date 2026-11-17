@@ -24,6 +24,23 @@
  * nenhuma conversa humana teve sequer 6 textos com até 3 diferentes num dia (o mais
  * repetido foi um robô de status do Leandro: 9 textos, 3 diferentes). Humano com "ok",
  * "sim" e "bom dia" espalhados tem dezenas de textos diferentes ao lado.
+ *
+ * Reconhecimento pelo RABO da conversa (17/11/2026, card #1223): em 28/10 a Duda respondeu
+ * 17 vezes em 10 min ao menu automático da B4 Telecom ("Opção não encontrada, por favor,
+ * escolha uma das opções do menu"), US$ 0,68, até um atendente entrar. As regras de cima não
+ * viram: a pessoa da empresa tinha conversado antes, na mesma hora, então havia 9 textos
+ * diferentes na janela. `decidirRoboNoRabo` olha só as últimas mensagens recebidas:
+ *  - eco: as 3 últimas são o mesmo texto de 60+ caracteres e já respondemos no meio;
+ *  - automaticas: as 2 últimas têm cara de mensagem automática (agents/mensagem-automatica.ts)
+ *    e não há fala de gente esperando resposta.
+ * Simulado com este código em 30 dias (42.684 textos recebidos, 5.731 conversas): 7 conversas
+ * pegas, todas robô. eco: Claro (na 3ª mensagem, não na 24ª), B4 e uma propaganda da Vivo.
+ * automaticas: B4 (pausa na 2ª mensagem do robô: 1 resposta em vez de 17), Shopee e três menus
+ * de empresa. Nenhuma conversa de gente. O que ficou de fora de propósito: 2 textos iguais
+ * (paciente repete nome, pergunta e o texto do anúncio; parceiro repete o pedido) e 3 iguais
+ * curtos ("pode mandar" 3 vezes, "Olá! Tenho interesse em agendar uma consulta, por favor." 3 vezes).
+ * Uma mensagem automática sozinha também não pausa: paciente encaminha cobrança e aviso
+ * automático para perguntar sobre eles.
  */
 
 export const JANELA_LOOP_MS = 60 * 60 * 1000;
@@ -41,7 +58,18 @@ export interface DecisaoLoop {
   loop: boolean;
   textos: number;
   distintos: number;
-  regra?: 'repeticao' | 'poucas_frases' | 'lento';
+  regra?: 'repeticao' | 'poucas_frases' | 'lento' | 'eco' | 'automaticas';
+}
+
+export const ECO_MIN_REPETICOES = 3;
+export const ECO_MIN_CARACTERES = 60;
+export const AUTOMATICAS_SEGUIDAS = 2;
+
+/** Mensagem da conversa, nas duas direções (o mesmo formato de `getUltimasMensagensDaConversa`). */
+export interface MensagemDaLinha {
+  direction: string;
+  message_type: string | null;
+  content: string | null;
 }
 
 export function normalizarTexto(texto: string): string {
@@ -86,4 +114,59 @@ export function decidirLoopRoboTurno(mensagens: MensagemRecebida[], agora = Date
   if (rapido.loop) return rapido;
   const lento = decidirLoopLento(mensagens);
   return lento.loop ? lento : rapido;
+}
+
+/**
+ * Robô reconhecido pelas últimas mensagens da conversa. `linha` vem em ordem cronológica,
+ * com as duas direções; mensagem de sistema não conta.
+ *
+ * - `eco`: as 3 últimas recebidas (ou mais) são o mesmo texto longo e nós já mandamos algo
+ *   depois da primeira delas. É o pingue-pongue: respondemos e voltou igual. Sem a nossa saída
+ *   no meio seria só alguém colando a mesma pergunta três vezes enquanto espera (a rajada
+ *   descarta o turno e o seguinte responde tudo).
+ * - `automaticas`: as 2 últimas recebidas são texto com cara de mensagem automática e tudo
+ *   o que chegou depois da nossa última saída também é. Se há fala de gente sem resposta
+ *   no meio (pergunta do paciente seguida da saudação automática do WhatsApp dele), o turno segue.
+ *
+ * Volta sozinho: basta chegar um texto diferente (eco) ou uma fala que não seja automática.
+ */
+export function decidirRoboNoRabo(linha: MensagemDaLinha[], pareceAutomatica: (texto: string) => boolean): DecisaoLoop {
+  const msgs = linha.filter((m) => m.message_type !== 'system');
+  const recebidas: number[] = [];
+  let ultimaSaida = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].direction === 'inbound') recebidas.push(i);
+    else if (msgs[i].direction === 'outbound' && ultimaSaida < 0) ultimaSaida = i;
+  }
+  const nao: DecisaoLoop = { loop: false, textos: 0, distintos: 0 };
+  if (!recebidas.length) return nao;
+
+  const textoDe = (i: number): string => (msgs[i].message_type === 'text' ? normalizarTexto(msgs[i].content ?? '') : '');
+
+  const alvo = textoDe(recebidas[0]);
+  if (alvo.length >= ECO_MIN_CARACTERES) {
+    let iguais = 0;
+    for (const i of recebidas) {
+      if (textoDe(i) !== alvo) break;
+      iguais++;
+    }
+    // Saída nossa depois da mais velha da sequência inteira (não só das 3 últimas): com a IA
+    // pausada a sequência cresce sem resposta nova, e a pausa tem de continuar.
+    if (iguais >= ECO_MIN_REPETICOES && ultimaSaida > recebidas[iguais - 1]) {
+      return { loop: true, textos: iguais, distintos: 1, regra: 'eco' };
+    }
+  }
+
+  const automaticas: string[] = [];
+  for (const i of recebidas) {
+    const t = textoDe(i);
+    if (!t || !pareceAutomatica(msgs[i].content ?? '')) break;
+    automaticas.push(t);
+  }
+  const semResposta = recebidas.filter((i) => i > ultimaSaida).length;
+  if (automaticas.length >= AUTOMATICAS_SEGUIDAS && semResposta <= automaticas.length) {
+    return { loop: true, textos: automaticas.length, distintos: new Set(automaticas).size, regra: 'automaticas' };
+  }
+
+  return nao;
 }

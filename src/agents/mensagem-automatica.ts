@@ -8,6 +8,14 @@
  * 09 e 11/11/2026: mais 2 casos que escaparam. Mensagem de ausência de conta comercial ("não
  * estamos disponíveis para atendimento... nosso horário de atendimento é...") e convite de
  * aplicativo ("Convide amigos para entrar no TikTok Lite usando seu código e ganhe recompensas").
+ *
+ * 17/11/2026 (card #1223): menu de opções de empresa. Em 28/10 a Duda respondeu 17 vezes ao
+ * atendimento automático da B4 Telecom ("Seja bem-vindo a central de atendimento...", "Opção não
+ * encontrada, por favor, escolha uma das opções do menu (Digite somente o número da opção)").
+ * Nenhuma dessas frases era reconhecida aqui. Desde então a função também decide a pausa antes
+ * do LLM quando as duas últimas mensagens recebidas são automáticas (agents/loop-robo.ts,
+ * `decidirRoboNoRabo`): uma mensagem só nunca cala a IA, porque paciente encaminha mensagem
+ * automática para perguntar sobre ela.
  */
 const FORTES = [
   /resposta autom[aá]tica\*?\s*\n/i,
@@ -20,6 +28,13 @@ const FORTES = [
   /no momento,? n[aã]o estamos (mais )?dispon[ií]ve(l|is)/i,
   /n[aã]o estamos (mais )?dispon[ií]ve(l|is) (no momento|(para|pra) (o )?atend)/i,
   /nosso hor[aá]rio de (atendimento|funcionamento) [eé]\s/i,
+  // Menu de opções: só robô manda escolher opção pelo número ou avisa que a opção não existe.
+  /op[cç][aã]o\s+(n[aã]o\s+(encontrada|reconhecida)|inv[aá]lida)\b[\s\S]{0,60}\b(escolha|digite|selecione|informe)\b/i,
+  /\b(escolha|selecione|digite)\s+uma\s+das\s+(seguintes\s+)?op[cç][oõ]es\b/i,
+  /\bdigite\s+(somente|apenas|s[oó])\s+o\s+n[uú]mero\b/i,
+  /\bdigite\s+o\s+\*?n[uú]mero\*?\s+da\s+op[cç][aã]o\b/i,
+  /\bdigite\s+(a\s+palavra\s+)?[*"“”']*menu\b/i,
+  /bem[- ]vind[oa]s?\s*(\(a\)\s*)?(a|à|ao)\s+(nossa\s+|nosso\s+)?(central\s+de\s+atendimento|atendimento\s+(digital|virtual|autom[aá]tico))/i,
 ];
 const FRACOS = [
   /agradece(mos)? (o |seu |pelo |a |sua |pela )?(sua )?(contato|mensagem)/i,
@@ -44,10 +59,31 @@ const FRACOS = [
   /\b(um|uma) de noss[oa]s (atendentes|consultor(es|as)|especialistas)\b/i,
   /hor[aá]rio de atendimento\s*:/i,
   /\bexceto feriados\b/i,
+  // Menu de empresa sem a frase forte: "escolha a opção que melhor descreve...", "selecione qual desses serviços...".
+  /\b(escolha|selecione)\s+(a\s+op[cç][aã]o|uma\s+op[cç][aã]o|qual|o\s+(n[uú]mero|servi[cç]o|setor|assunto))\b/i,
+  // Fim de atendimento de central ("Atendimento finalizado, agradecemos o contato", "...segue seu protocolo: 592239624").
+  /\batendimento\s+(foi\s+)?(finalizado|encerrado)\b/i,
+  /\bprotocolo\b[^\n]{0,25}\d{6,}/i,
+  // Pesquisa de satisfação ("Como você avalia o meu atendimento? *5* – Muito satisfeito...").
+  /\bcomo\s+voc[eê]\s+avalia\b/i,
 ];
+
+/**
+ * Itens de menu numerados ("*[ 1 ]* - Já sou cliente", "1 - Financeiro", "2) Suporte", ou o número em tecla de emoji),
+ * em linhas ou na mesma linha. Só conta quando aparecem o 1 e o 2: quem responde um questionário
+ * ("2- sim 3- não") ou lista telefones ("(81) 9...") não começa do 1 seguido de texto. Sinal fraco:
+ * paciente também numera exames ("1. hemograma 2. glicemia").
+ */
+const ITEM_DE_MENU = /(?:^|[\s:])[*_~]*[[(]?[ \t]*(\d{1,2})[ \t]*[\])]?[*_~]*[ \t]*[*_~]*(?:[-–—.)]|\uFE0F?\u20E3)[ \t]*[*_~]*[ \t]*[^\d\s]/g;
+
+export function temOpcoesNumeradas(mensagem: string): boolean {
+  const numeros = new Set<number>();
+  for (const achado of String(mensagem ?? '').matchAll(ITEM_DE_MENU)) numeros.add(Number(achado[1]));
+  return numeros.has(1) && numeros.has(2);
+}
 
 export function pareceMensagemAutomatica(mensagem: string): boolean {
   const m = String(mensagem ?? '');
   if (FORTES.some((r) => r.test(m))) return true;
-  return FRACOS.filter((r) => r.test(m)).length >= 2;
+  return FRACOS.filter((r) => r.test(m)).length + (temOpcoesNumeradas(m) ? 1 : 0) >= 2;
 }
