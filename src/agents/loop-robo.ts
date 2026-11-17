@@ -30,17 +30,16 @@
  * escolha uma das opções do menu"), US$ 0,68, até um atendente entrar. As regras de cima não
  * viram: a pessoa da empresa tinha conversado antes, na mesma hora, então havia 9 textos
  * diferentes na janela. `decidirRoboNoRabo` olha só as últimas mensagens recebidas:
- *  - eco: as 3 últimas são o mesmo texto de 60+ caracteres e já respondemos no meio;
- *  - automaticas: as 2 últimas têm cara de mensagem automática (agents/mensagem-automatica.ts)
- *    e não há fala de gente esperando resposta.
- * Simulado com este código em 30 dias (42.684 textos recebidos, 5.731 conversas): 7 conversas
- * pegas, todas robô. eco: Claro (na 3ª mensagem, não na 24ª), B4 e uma propaganda da Vivo.
- * automaticas: B4 (pausa na 2ª mensagem do robô: 1 resposta em vez de 17), Shopee e três menus
- * de empresa. Nenhuma conversa de gente. O que ficou de fora de propósito: 2 textos iguais
- * (paciente repete nome, pergunta e o texto do anúncio; parceiro repete o pedido) e 3 iguais
- * curtos ("pode mandar" 3 vezes, "Olá! Tenho interesse em agendar uma consulta, por favor." 3 vezes).
- * Uma mensagem automática sozinha também não pausa: paciente encaminha cobrança e aviso
- * automático para perguntar sobre eles.
+ *  - eco: as 5 últimas são o mesmo texto de 60+ caracteres;
+ *  - automaticas: as 2 últimas têm cara de mensagem automática (agents/mensagem-automatica.ts).
+ * Nos dois casos só vale com pingue-pongue provado (já mandamos algo depois da primeira da
+ * sequência e voltou a mesma coisa) e com a fala do turno batendo com a sequência. O que
+ * ficou de fora de propósito, porque cala gente: 2 textos iguais (paciente repete nome,
+ * pergunta e o texto do anúncio; parceiro repete o pedido), 3 iguais ("pode mandar" 3 vezes;
+ * paciente que cola a mesma pergunta longa depois de duas respostas ruins da IA) e uma
+ * mensagem automática sozinha (paciente encaminha cobrança para perguntar sobre ela).
+ * Revisão do Codex no mesmo dia: eco passou de 3 para 5, a sequência sem saída nossa só
+ * pausa a partir de 10 e quem cita um menu para pedir ajuda não conta como robô.
  */
 
 export const JANELA_LOOP_MS = 60 * 60 * 1000;
@@ -61,9 +60,11 @@ export interface DecisaoLoop {
   regra?: 'repeticao' | 'poucas_frases' | 'lento' | 'eco' | 'automaticas';
 }
 
-export const ECO_MIN_REPETICOES = 3;
+export const ECO_MIN_REPETICOES = 5;
 export const ECO_MIN_CARACTERES = 60;
 export const AUTOMATICAS_SEGUIDAS = 2;
+/** Sequência deste tamanho pausa mesmo sem saída nossa à vista (ninguém manda 10 vezes seguidas o mesmo texto longo). */
+export const SEQUENCIA_SEM_DUVIDA = 10;
 
 /** Mensagem da conversa, nas duas direções (o mesmo formato de `getUltimasMensagensDaConversa`). */
 export interface MensagemDaLinha {
@@ -120,17 +121,28 @@ export function decidirLoopRoboTurno(mensagens: MensagemRecebida[], agora = Date
  * Robô reconhecido pelas últimas mensagens da conversa. `linha` vem em ordem cronológica,
  * com as duas direções; mensagem de sistema não conta.
  *
- * - `eco`: as 3 últimas recebidas (ou mais) são o mesmo texto longo e nós já mandamos algo
- *   depois da primeira delas. É o pingue-pongue: respondemos e voltou igual. Sem a nossa saída
- *   no meio seria só alguém colando a mesma pergunta três vezes enquanto espera (a rajada
- *   descarta o turno e o seguinte responde tudo).
- * - `automaticas`: as 2 últimas recebidas são texto com cara de mensagem automática e tudo
- *   o que chegou depois da nossa última saída também é. Se há fala de gente sem resposta
- *   no meio (pergunta do paciente seguida da saudação automática do WhatsApp dele), o turno segue.
+ * - `eco`: as 5 últimas recebidas (ou mais) são o mesmo texto longo.
+ * - `automaticas`: as 2 últimas recebidas (ou mais) são texto com cara de mensagem automática.
+ *
+ * Três condições valem para as duas regras:
+ * 1. Pingue-pongue: nós já mandamos algo depois da mais velha da sequência e voltou a mesma
+ *    coisa. Sem saída nossa no meio pode ser gente (colou a pergunta várias vezes enquanto
+ *    espera; encaminhou duas mensagens automáticas de uma vez; pergunta sem resposta seguida da
+ *    saudação automática do WhatsApp dela). A exceção é a sequência de 10 ou mais, que pausa
+ *    mesmo sem saída à vista: sem ela, numa pausa longa a nossa última saída sairia do recorte
+ *    de 40 mensagens e a IA responderia de novo a cada 39.
+ * 2. A fala do turno (`textoDoTurno`, o que o n8n mandou) bate com a sequência. A leitura do
+ *    banco pode estar atrasada: se a pessoa escreveu agora e o recorte ainda mostra só o robô,
+ *    o turno segue.
+ * 3. Com a IA pausada a sequência cresce sem resposta nova e a pausa continua.
  *
  * Volta sozinho: basta chegar um texto diferente (eco) ou uma fala que não seja automática.
  */
-export function decidirRoboNoRabo(linha: MensagemDaLinha[], pareceAutomatica: (texto: string) => boolean): DecisaoLoop {
+export function decidirRoboNoRabo(
+  linha: MensagemDaLinha[],
+  pareceAutomatica: (texto: string) => boolean,
+  textoDoTurno: string,
+): DecisaoLoop {
   const msgs = linha.filter((m) => m.message_type !== 'system');
   const recebidas: number[] = [];
   let ultimaSaida = -1;
@@ -142,17 +154,18 @@ export function decidirRoboNoRabo(linha: MensagemDaLinha[], pareceAutomatica: (t
   if (!recebidas.length) return nao;
 
   const textoDe = (i: number): string => (msgs[i].message_type === 'text' ? normalizarTexto(msgs[i].content ?? '') : '');
+  // Pingue-pongue provado (saída nossa depois da mais velha da sequência) ou sequência longa demais para ser gente.
+  const comprovada = (tamanho: number): boolean => ultimaSaida > recebidas[tamanho - 1] || tamanho >= SEQUENCIA_SEM_DUVIDA;
+  const turno = normalizarTexto(textoDoTurno ?? '');
 
   const alvo = textoDe(recebidas[0]);
-  if (alvo.length >= ECO_MIN_CARACTERES) {
+  if (alvo.length >= ECO_MIN_CARACTERES && turno.includes(alvo)) {
     let iguais = 0;
     for (const i of recebidas) {
       if (textoDe(i) !== alvo) break;
       iguais++;
     }
-    // Saída nossa depois da mais velha da sequência inteira (não só das 3 últimas): com a IA
-    // pausada a sequência cresce sem resposta nova, e a pausa tem de continuar.
-    if (iguais >= ECO_MIN_REPETICOES && ultimaSaida > recebidas[iguais - 1]) {
+    if (iguais >= ECO_MIN_REPETICOES && comprovada(iguais)) {
       return { loop: true, textos: iguais, distintos: 1, regra: 'eco' };
     }
   }
@@ -163,8 +176,7 @@ export function decidirRoboNoRabo(linha: MensagemDaLinha[], pareceAutomatica: (t
     if (!t || !pareceAutomatica(msgs[i].content ?? '')) break;
     automaticas.push(t);
   }
-  const semResposta = recebidas.filter((i) => i > ultimaSaida).length;
-  if (automaticas.length >= AUTOMATICAS_SEGUIDAS && semResposta <= automaticas.length) {
+  if (automaticas.length >= AUTOMATICAS_SEGUIDAS && comprovada(automaticas.length) && pareceAutomatica(textoDoTurno ?? '')) {
     return { loop: true, textos: automaticas.length, distintos: new Set(automaticas).size, regra: 'automaticas' };
   }
 

@@ -137,13 +137,17 @@ describe('robô reconhecido pelo rabo da conversa (card #1223)', () => {
   const cliente = (content: string | null, message_type = 'text'): MensagemDaLinha => ({ direction: 'inbound', message_type, content });
   const ia = (content = 'resposta da IA'): MensagemDaLinha => ({ direction: 'outbound', message_type: 'text', content });
   const sistema = (): MensagemDaLinha => ({ direction: 'outbound', message_type: 'system', content: 'Conversa devolvida para a IA' });
-  const decidir = (linha: MensagemDaLinha[]) => decidirRoboNoRabo(linha, pareceMensagemAutomatica);
+  const ultimaRecebida = (linha: MensagemDaLinha[]) => [...linha].reverse().find((m) => m.direction === 'inbound')?.content ?? '';
+  /** Por padrão a fala do turno é a última recebida, como no fluxo real; `turno` simula leitura atrasada. */
+  const decidir = (linha: MensagemDaLinha[], turno?: string) => decidirRoboNoRabo(linha, pareceMensagemAutomatica, turno ?? ultimaRecebida(linha));
+  const vezes = <T>(n: number, f: () => T[]): T[] => Array.from({ length: n }, f).flat();
 
   const FINALIZADO = 'Atendimento finalizado, agradecemos o contato';
   const BOAS_VINDAS = 'Seja bem-vindo a central de atendimento da *B4 TELECOM*🚀🚀🚀\n\nPara iniciarmos seu atendimento, por favor me informe *seu nome*.';
   const MENU = 'Seja bem-vindo a central de atendimento da *B4 TELECOM*🚀🚀🚀\n\nPara que eu possa lhe ajudar, escolha uma das opções abaixo pelo número correspondente:\n\n *[ 1 ]* - *Já sou cliente*\n *[ 2 ]* - *Não sou cliente*';
   const NAO_ENCONTRADA = 'Opção não encontrada, por favor, escolha uma das opções do menu (Digite somente o número da opção).\n                        \n *[ 1 ]* - *Já sou cliente*\n *[ 2 ]* - *Não sou cliente*';
   const CLARO = 'Em caso de dúvidas ou para mais informações, acesse sua conta: https://minhaclaro.claro.com.br/acesso-rapido/ ou, se preferir, mande uma mensagem';
+  const PERGUNTA = 'Boa tarde, gostaria de saber o valor da ressonância do joelho e se tem vaga ainda essa semana';
 
   // Conversa real de 28/10/2026 (Duda x B4 Telecom): a Sabrina conversou, o atendimento dela
   // foi encerrado e o menu automático da empresa passou a responder a Duda.
@@ -156,85 +160,122 @@ describe('robô reconhecido pelo rabo da conversa (card #1223)', () => {
     cliente('agradeço.'), ia(),
   ];
 
-  it('B4: a primeira mensagem automática ainda passa (uma só não cala a IA)', () => {
-    expect(decidir([...SABRINA, cliente(FINALIZADO)]).loop).toBe(false);
+  describe('mensagens automáticas seguidas', () => {
+    it('B4: a primeira mensagem automática ainda passa (uma só não cala a IA)', () => {
+      expect(decidir([...SABRINA, cliente(FINALIZADO)]).loop).toBe(false);
+    });
+
+    it('B4: respondemos a primeira e veio outra automática: pausa, antes do menu se repetir', () => {
+      expect(decidir([...SABRINA, cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS)])).toEqual({ loop: true, textos: 2, distintos: 2, regra: 'automaticas' });
+    });
+
+    it('B4: com a IA pausada, o menu e a opção não encontrada continuam pausados', () => {
+      const linha = [...SABRINA, cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS), cliente(MENU), cliente(NAO_ENCONTRADA), cliente(NAO_ENCONTRADA)];
+      expect(decidir(linha)).toMatchObject({ loop: true, regra: 'automaticas', textos: 5 });
+    });
+
+    it('B4: as regras de repetição sozinhas não pegavam (9 textos diferentes na hora)', () => {
+      const recebidas = [...SABRINA, cliente(FINALIZADO), cliente(BOAS_VINDAS), cliente(MENU), ...Array.from({ length: 8 }, () => cliente(NAO_ENCONTRADA))]
+        .filter((m) => m.direction === 'inbound');
+      expect(decidirLoopRoboTurno(recebidas).loop).toBe(false);
+    });
+
+    it('a pessoa voltou a falar depois do robô: a IA responde', () => {
+      const linha = [...SABRINA, cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS), cliente(MENU), cliente('Oi, a diretoria aprovou, pode agendar')];
+      expect(decidir(linha).loop).toBe(false);
+    });
+
+    it('pergunta de gente sem resposta + duas automáticas do WhatsApp dela: a IA responde', () => {
+      const linha = [ia('Oi! Conseguiu ver os horários?'), cliente('Quanto custa a consulta com cardiologista?'), cliente(BOAS_VINDAS), cliente(MENU)];
+      expect(decidir(linha).loop).toBe(false);
+    });
+
+    it('duas automáticas de uma vez, sem resposta nossa no meio, ainda passam; a seguinte, depois da resposta, pausa', () => {
+      const SHOPEE = 'Olá Agradecemos seu contato! Este é o WhatsApp oficial da Shopee. Como podemos ajudar?';
+      expect(decidir([cliente(SHOPEE), cliente(MENU)]).loop).toBe(false);
+      expect(decidir([cliente('Quanto custa a consulta?'), ia('R$ 150,00'), cliente(BOAS_VINDAS), cliente(MENU)]).loop).toBe(false);
+      expect(decidir([cliente(SHOPEE), cliente(MENU), ia(), cliente(NAO_ENCONTRADA)])).toMatchObject({ loop: true, regra: 'automaticas', textos: 3 });
+    });
+
+    it('áudio ou foto entre as automáticas é sinal de gente: não pausa', () => {
+      expect(decidir([cliente(FINALIZADO), ia(), cliente('', 'audio'), cliente(BOAS_VINDAS)]).loop).toBe(false);
+      expect(decidir([cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS), cliente(null, 'image')]).loop).toBe(false);
+    });
+
+    it('paciente que encaminha UMA mensagem automática e pergunta sobre ela: a IA responde', () => {
+      const linha = [cliente('Olá Francisco, esta é uma mensagem automática da empresa. Para não receber novas mensagens, selecione Parar.'), ia(), cliente('Não está aparecendo o QR código!?')];
+      expect(decidir(linha).loop).toBe(false);
+    });
+
+    it('revisão do Codex: paciente reclamando do menu, citando as frases, não é robô (nem com resposta nossa no meio)', () => {
+      const R1 = "Tentei agendar e apareceu 'opção inválida, digite somente o número'. O que faço?";
+      const R2 = "Agora apareceu 'digite menu'. Vocês conseguem marcar pra mim?";
+      expect(decidir([cliente(R1), cliente(R2)]).loop).toBe(false);
+      expect(decidir([cliente(R1), ia(), cliente(R2)]).loop).toBe(false);
+    });
+
+    it('revisão do Codex: leitura do banco atrasada, a pessoa acabou de escrever: o turno segue', () => {
+      const linha = [cliente(FINALIZADO), ia(), cliente('Digite menu para continuar')];
+      expect(decidir(linha).loop).toBe(true);
+      expect(decidir(linha, 'Oi, sou a Maria, pode agendar amanhã?').loop).toBe(false);
+    });
+
+    it('mensagem de sistema no meio não muda a decisão', () => {
+      expect(decidir([...SABRINA, cliente(FINALIZADO), ia(), sistema(), cliente(BOAS_VINDAS)])).toMatchObject({ loop: true, regra: 'automaticas' });
+    });
+
+    it('10 automáticas seguidas pausam mesmo sem resposta nossa à vista; 9 não', () => {
+      // Textos alternados: 10 iguais cairiam na regra de eco.
+      const alternadas = (n: number) => Array.from({ length: n }, (_, i) => cliente(i % 2 ? MENU : BOAS_VINDAS));
+      expect(decidir([ia(), ...alternadas(9)]).loop).toBe(false);
+      expect(decidir([ia(), ...alternadas(10)])).toEqual({ loop: true, textos: 10, distintos: 2, regra: 'automaticas' });
+    });
   });
 
-  it('B4: a segunda mensagem automática seguida pausa, antes do menu se repetir', () => {
-    expect(decidir([...SABRINA, cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS)])).toEqual({ loop: true, textos: 2, distintos: 2, regra: 'automaticas' });
-  });
+  describe('eco', () => {
+    it('Claro: respondemos e o mesmo texto longo voltou pela quinta vez', () => {
+      expect(decidir([...vezes(4, () => [cliente(CLARO), ia()]), cliente(CLARO)])).toEqual({ loop: true, textos: 5, distintos: 1, regra: 'eco' });
+    });
 
-  it('B4: com a IA pausada, o menu e a opção não encontrada continuam pausados', () => {
-    const linha = [...SABRINA, cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS), cliente(MENU), cliente(NAO_ENCONTRADA), cliente(NAO_ENCONTRADA)];
-    expect(decidir(linha)).toMatchObject({ loop: true, regra: 'automaticas' });
-  });
+    it('quatro vezes ainda não', () => {
+      expect(decidir([...vezes(3, () => [cliente(CLARO), ia()]), cliente(CLARO)]).loop).toBe(false);
+    });
 
-  it('B4: as regras de repetição sozinhas não pegavam (9 textos diferentes na hora)', () => {
-    const recebidas = [...SABRINA, cliente(FINALIZADO), cliente(BOAS_VINDAS), cliente(MENU), ...Array.from({ length: 8 }, () => cliente(NAO_ENCONTRADA))]
-      .filter((m) => m.direction === 'inbound');
-    expect(decidirLoopRoboTurno(recebidas).loop).toBe(false);
-  });
+    it('revisão do Codex: paciente que cola a mesma pergunta longa depois de respostas ruins continua atendido', () => {
+      expect(decidir([cliente(PERGUNTA), ia('Qual exame deseja?'), cliente(PERGUNTA), ia('Como posso ajudar?'), cliente(PERGUNTA)]).loop).toBe(false);
+      expect(decidir([...vezes(3, () => [cliente(PERGUNTA), ia('Como posso ajudar?')]), cliente(PERGUNTA)]).loop).toBe(false);
+    });
 
-  it('a pessoa voltou a falar depois do robô: a IA responde', () => {
-    const linha = [...SABRINA, cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS), cliente(MENU), cliente('Oi, a diretoria aprovou, pode agendar')];
-    expect(decidir(linha).loop).toBe(false);
-  });
+    it('com a IA pausada a sequência cresce e a pausa continua', () => {
+      const linha = [...vezes(4, () => [cliente(CLARO), ia()]), ...vezes(6, () => [cliente(CLARO)])];
+      expect(decidir(linha)).toMatchObject({ loop: true, regra: 'eco', textos: 10 });
+    });
 
-  it('pergunta de gente sem resposta + duas automáticas do WhatsApp dela: a IA responde', () => {
-    const linha = [ia('Oi! Conseguiu ver os horários?'), cliente('Quanto custa a consulta com cardiologista?'), cliente(BOAS_VINDAS), cliente(MENU)];
-    expect(decidir(linha).loop).toBe(false);
-  });
+    it('revisão do Codex: pausa longa, a nossa última saída sai do recorte de 40 e a pausa continua', () => {
+      expect(decidir([cliente(CLARO), ia(), ...vezes(38, () => [cliente(CLARO)])])).toMatchObject({ loop: true, regra: 'eco' });
+      expect(decidir([ia(), ...vezes(39, () => [cliente(CLARO)])])).toMatchObject({ loop: true, regra: 'eco', textos: 39 });
+      expect(decidir(vezes(40, () => [cliente(CLARO)]))).toMatchObject({ loop: true, regra: 'eco', textos: 40 });
+    });
 
-  it('pergunta já respondida + duas automáticas: pausa', () => {
-    const linha = [cliente('Quanto custa a consulta com cardiologista?'), ia('R$ 150,00'), cliente(BOAS_VINDAS), cliente(MENU)];
-    expect(decidir(linha)).toMatchObject({ loop: true, regra: 'automaticas' });
-  });
+    it('a mesma pergunta longa colada 5 vezes sem resposta nossa no meio não pausa', () => {
+      expect(decidir([ia('Oi!'), ...vezes(5, () => [cliente(PERGUNTA)])]).loop).toBe(false);
+    });
 
-  it('primeiro contato já com duas automáticas seguidas (propaganda de empresa): pausa', () => {
-    const SHOPEE = 'Olá Agradecemos seu contato! Este é o WhatsApp oficial da Shopee. Como podemos ajudar?';
-    expect(decidir([cliente(SHOPEE), cliente(MENU)])).toMatchObject({ loop: true, regra: 'automaticas' });
-  });
+    it('texto curto repetido não pausa (casos reais: "pode mandar" e o texto do anúncio)', () => {
+      const ANUNCIO = 'Olá! Tenho interesse em agendar uma consulta, por favor.';
+      expect(decidir([...vezes(5, () => [cliente('pode mandar'), ia()]), cliente('pode mandar')]).loop).toBe(false);
+      expect(decidir([...vezes(5, () => [cliente(ANUNCIO), ia()]), cliente(ANUNCIO)]).loop).toBe(false);
+    });
 
-  it('áudio ou foto entre as automáticas é sinal de gente: não pausa', () => {
-    expect(decidir([cliente(FINALIZADO), ia(), cliente('', 'audio'), cliente(BOAS_VINDAS)]).loop).toBe(false);
-    expect(decidir([cliente(BOAS_VINDAS), cliente(null, 'image')]).loop).toBe(false);
-  });
+    it('texto diferente no meio quebra a sequência', () => {
+      expect(decidir([...vezes(4, () => [cliente(CLARO), ia()]), cliente('oi, é a Maria'), ia(), cliente(CLARO)]).loop).toBe(false);
+    });
 
-  it('paciente que encaminha UMA mensagem automática e pergunta sobre ela: a IA responde', () => {
-    const linha = [cliente('Olá Francisco, esta é uma mensagem automática da empresa. Para não receber novas mensagens, selecione Parar.'), cliente('Não está aparecendo o QR código!?')];
-    expect(decidir(linha).loop).toBe(false);
-  });
-
-  it('mensagem de sistema no meio não muda a decisão', () => {
-    expect(decidir([...SABRINA, cliente(FINALIZADO), ia(), sistema(), cliente(BOAS_VINDAS)])).toMatchObject({ loop: true, regra: 'automaticas' });
-  });
-
-  it('eco (Claro): respondemos duas vezes e o mesmo texto longo voltou pela terceira vez', () => {
-    expect(decidir([cliente(CLARO), ia(), cliente(CLARO), ia(), cliente(CLARO)])).toEqual({ loop: true, textos: 3, distintos: 1, regra: 'eco' });
-  });
-
-  it('eco: duas vezes ainda não (parceiro e paciente repetem o pedido uma vez)', () => {
-    expect(decidir([cliente(CLARO), ia(), cliente(CLARO)]).loop).toBe(false);
-  });
-
-  it('eco: com a IA pausada a sequência cresce e a pausa continua', () => {
-    const linha = [cliente(CLARO), ia(), cliente(CLARO), ia(), ...Array.from({ length: 6 }, () => cliente(CLARO))];
-    expect(decidir(linha)).toMatchObject({ loop: true, regra: 'eco', textos: 8 });
-  });
-
-  it('eco: a mesma pergunta longa colada 3 vezes sem resposta nossa no meio não pausa', () => {
-    const PERGUNTA = 'Boa tarde, gostaria de saber o valor da ressonância do joelho e se tem vaga ainda essa semana';
-    expect(decidir([ia('Oi!'), cliente(PERGUNTA), cliente(PERGUNTA), cliente(PERGUNTA)]).loop).toBe(false);
-  });
-
-  it('eco: texto curto repetido não pausa (casos reais: "pode mandar" e o texto do anúncio, 3 vezes)', () => {
-    const ANUNCIO = 'Olá! Tenho interesse em agendar uma consulta, por favor.';
-    expect(decidir([cliente('pode mandar'), ia(), cliente('pode mandar'), ia(), cliente('pode mandar')]).loop).toBe(false);
-    expect(decidir([cliente(ANUNCIO), ia(), cliente(ANUNCIO), ia(), cliente(ANUNCIO)]).loop).toBe(false);
-  });
-
-  it('eco: texto diferente no meio quebra a sequência', () => {
-    expect(decidir([cliente(CLARO), ia(), cliente(CLARO), ia(), cliente('oi, é a Maria'), ia(), cliente(CLARO)]).loop).toBe(false);
+    it('leitura do banco atrasada: o recorte mostra o eco, mas a fala do turno é outra', () => {
+      const linha = [...vezes(4, () => [cliente(CLARO), ia()]), cliente(CLARO)];
+      expect(decidir(linha, 'Bom dia, quero remarcar minha consulta').loop).toBe(false);
+      expect(decidir(linha, `${CLARO}\n${CLARO}`).loop).toBe(true);
+    });
   });
 
   it('sem mensagem recebida não pausa', () => {

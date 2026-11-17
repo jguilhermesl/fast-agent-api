@@ -200,6 +200,28 @@ describe('turno com robô do outro lado (ligação no orquestrador)', () => {
     expect(logGuardShadow).not.toHaveBeenCalled();
   });
 
+  it('leitura do banco atrasada: o recorte mostra só o robô, mas a pessoa acabou de escrever: o turno segue', async () => {
+    const linha = conversaB4();
+    vi.mocked(getUltimasMensagensDaConversa).mockResolvedValue(linha);
+    vi.mocked(getMensagensRecebidasDesde).mockResolvedValue(recebidasDe(linha));
+
+    const { erro } = await rodar(pedido('Oi, sou a Sabrina de novo, pode agendar amanhã?'));
+
+    expect(erro).toBe(PASSOU);
+    expect(logGuardShadow).not.toHaveBeenCalled();
+  });
+
+  it('turno de áudio não entra na regra do rabo', async () => {
+    const linha = conversaB4();
+    vi.mocked(getUltimasMensagensDaConversa).mockResolvedValue(linha);
+    vi.mocked(getMensagensRecebidasDesde).mockResolvedValue(recebidasDe(linha));
+
+    const { erro } = await rodar({ ...pedido(BOAS_VINDAS), client_message_type: 'audio_transcription' } as ChatRequest);
+
+    expect(erro).toBe(PASSOU);
+    expect(logGuardShadow).not.toHaveBeenCalled();
+  });
+
   it('LOOP_ROBO_MODE=log: registra como detectado e o turno segue', async () => {
     estado.loopRoboMode = 'log';
     const linha = conversaB4();

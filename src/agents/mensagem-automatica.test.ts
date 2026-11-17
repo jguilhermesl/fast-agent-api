@@ -66,7 +66,19 @@ describe('pareceMensagemAutomatica', () => {
     'Remarcar terça quinta ou sábado (81) 9379-8103 (81) 98647-0542 (81) 9440-8751',
     'Pode escolher o melhor horário pra mim',
     'Consulta dia 12/10 às 10:30 ou 1.500 de entrada?',
+    // Revisão do Codex (17/11/2026): gente citando o menu para pedir ajuda.
+    "Tentei agendar e apareceu 'opção inválida, digite somente o número'. O que faço?",
+    "Agora apareceu 'digite menu'. Vocês conseguem marcar pra mim?",
+    'Recebi essa mensagem: Digite 1 para falar com o financeiro. É de vocês?',
+    'Me mandaram isso: Seja bem-vindo a central de atendimento, escolha uma das opções. Como eu marco?',
   ])('paciente: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(false));
+
+  it('revisão do Codex: "1" seguido de 50 mil espaços não trava a CPU', () => {
+    const texto = '1' + ' '.repeat(50_000) + 'x';
+    const inicio = performance.now();
+    expect(pareceMensagemAutomatica(texto)).toBe(false);
+    expect(performance.now() - inicio).toBeLessThan(300);
+  });
 });
 
 describe('silêncio só para robô', () => {

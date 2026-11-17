@@ -851,8 +851,10 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
         ultimasDaConversa ?? getUltimasMensagensDaConversa(req.conversation_id, desde).catch(() => null),
       ]);
       decisao = decidirLoopRoboTurno(recebidas);
-      if (!decisao.loop && linha) {
-        const rabo = decidirRoboNoRabo(linha, pareceMensagemAutomatica);
+      // Só em turno de texto: áudio e foto são sinal de gente, e a fala do turno entra na decisão
+      // (se a leitura do banco estiver atrasada e a pessoa tiver acabado de escrever, o turno segue).
+      if (!decisao.loop && linha && (req.client_message_type ?? 'text') === 'text') {
+        const rabo = decidirRoboNoRabo(linha, pareceMensagemAutomatica, req.client_messages);
         if (rabo.loop) decisao = rabo;
       }
     } catch (err) {

@@ -74,7 +74,9 @@ const FRACOS = [
  * ("2- sim 3- não") ou lista telefones ("(81) 9...") não começa do 1 seguido de texto. Sinal fraco:
  * paciente também numera exames ("1. hemograma 2. glicemia").
  */
-const ITEM_DE_MENU = /(?:^|[\s:])[*_~]*[[(]?[ \t]*(\d{1,2})[ \t]*[\])]?[*_~]*[ \t]*[*_~]*(?:[-–—.)]|\uFE0F?\u20E3)[ \t]*[*_~]*[ \t]*[^\d\s]/g;
+// Repetições com teto ({0,3}): com `*` em classes vizinhas, "1" seguido de 32 mil espaços levava 2,9 s
+// de CPU (retrocesso quadrático, achado na revisão do Codex de 17/11/2026).
+const ITEM_DE_MENU = /(?:^|[\s:])[*_~]{0,3}[[(]?[ \t]{0,3}(\d{1,2})[ \t]{0,3}[\])]?[*_~]{0,3}[ \t]{0,3}[*_~]{0,3}(?:[-–—.)]|\uFE0F?\u20E3)[ \t]{0,3}[*_~]{0,3}[ \t]{0,3}[^\d\s]/g;
 
 export function temOpcoesNumeradas(mensagem: string): boolean {
   const numeros = new Set<number>();
@@ -82,8 +84,17 @@ export function temOpcoesNumeradas(mensagem: string): boolean {
   return numeros.has(1) && numeros.has(2);
 }
 
+/**
+ * Gente falando SOBRE uma mensagem automática não é robô: "Tentei agendar e apareceu 'opção
+ * inválida, digite somente o número'. O que faço?", "Recebi essa mensagem, é de vocês?". Empresa
+ * fala "você" com o cliente; quem fala "vocês", "pra mim" e "tentei" é a pessoa. Ficou de fora
+ * "não consegui/não entendi", que robô de menu também diz.
+ */
+const FALA_DE_GENTE = /\b(tentei|apareceu|aparecendo|recebi\s+(ess[ae]|est[ae]|isso|uma?)|mandaram|o\s+que\s+(eu\s+)?(fa[cç]o|devo\s+fazer)|voc[eê]s|pra\s+mim|me\s+ajud[ae]m?)\b/i;
+
 export function pareceMensagemAutomatica(mensagem: string): boolean {
   const m = String(mensagem ?? '');
+  if (FALA_DE_GENTE.test(m)) return false;
   if (FORTES.some((r) => r.test(m))) return true;
   return FRACOS.filter((r) => r.test(m)).length + (temOpcoesNumeradas(m) ? 1 : 0) >= 2;
 }
