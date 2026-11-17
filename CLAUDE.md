@@ -55,6 +55,11 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   low`; família gpt-6/5.6 com `reasoning.effort: none`. Claude pelo OpenRouter **não** usa o crédito da
   Anthropic. Nenhum agente em produção usa OpenRouter ainda: o primeiro uso precisa de teste de fumaça pago
   (uma chamada com ferramenta por modelo) e do agente de teste. Base: `../estudo-20261031-mercado/README.md`.
+- **Trava de unidade** (`src/agents/trava-unidade.ts`, 17/11/2026), só com `prompt_config.trava_unidade`
+  (Leandro): data oferecida numa unidade que a agenda do turno não tem nessa data → refaz uma vez, se insistir
+  pede o dia; serviço restrito (invertida = Ibiporã) com data em outra unidade e sem aviso → acrescenta o
+  `aviso_texto`. Veredito em `guard_shadow_logs` (`unidade_data_*`, `servico_unidade_*`). Simulação nos 1.818
+  turnos reais de 30 dias: `npx tsx scripts/replay-trava-unidade.ts turnos.json config.json` (0 e 54).
 - **Recusa × objeção** (`src/agents/objecao.ts`, `9cdc7d3`): "não quero", "não tenho interesse" e
   "não, obrigada" são recusa (acolhe, não insiste, porta aberta uma vez). "Tá caro" e "é longe" continuam
   objeção.

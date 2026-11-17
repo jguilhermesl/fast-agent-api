@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { lerConfig as lerConfigTravaUnidade, type TravaUnidadeConfig } from '../agents/trava-unidade';
 import { config } from '../config';
 import type { AgentIntent, IntentLog, TokenLogEntry } from '../types';
 import type { MensagemDoCliente } from '../agents/cruzamento';
@@ -735,6 +736,26 @@ export async function getEnxergaAtendente(agentId: string): Promise<boolean> {
   }
   enxergaAtendenteCache.set(agentId, { em: Date.now(), ligado });
   return ligado;
+}
+
+/**
+ * `agents.prompt_config.trava_unidade` (agents/trava-unidade.ts, 17/11/2026). Ausente ou inválida = null
+ * (trava desligada). Falha de leitura = null: a trava nunca cala o agente.
+ */
+const travaUnidadeCache = new Map<string, { em: number; valor: TravaUnidadeConfig | null }>();
+
+export async function getTravaUnidade(agentId: string): Promise<TravaUnidadeConfig | null> {
+  const cache = travaUnidadeCache.get(agentId);
+  if (cache && Date.now() - cache.em < KB_OPCOES_TTL_MS) return cache.valor;
+  let valor: TravaUnidadeConfig | null = null;
+  try {
+    const { data: ag } = await supabase.from('agents').select('prompt_config').eq('id', agentId).single();
+    valor = lerConfigTravaUnidade((ag?.prompt_config as { trava_unidade?: unknown } | null)?.trava_unidade);
+  } catch (err) {
+    console.error('[TravaUnidade] prompt_config não lido, sem trava:', err instanceof Error ? err.message : String(err));
+  }
+  travaUnidadeCache.set(agentId, { em: Date.now(), valor });
+  return valor;
 }
 
 // ── Modelo do Executor por agente ─────────────────────────────
