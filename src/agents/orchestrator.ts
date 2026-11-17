@@ -41,7 +41,7 @@ import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas 
 import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
 import { detectarPerguntaRepetida, tirarPerguntasRepetidas, type PerguntaRepetida } from './pergunta-repetida';
-import { acrescentarAvisos, checarDataUnidade, checarServico, confirmacaoDoEvento, instrucaoDataUnidade, instrucaoServico, mapaDaAgenda, tirarContradicoes } from './trava-unidade';
+import { aplicarSemModelo, checarDataUnidade, checarServico, instrucaoDataUnidade, instrucaoServico, mapaDaAgenda, type MapaAgenda, type TravaUnidadeConfig } from './trava-unidade';
 import { notaDeRetomada, JANELA_DO_TURNO_MS } from './retomada';
 import { notaDoAtendente, JANELA_ATENDENTE_NO_HISTORICO_MS } from './atendente-no-historico';
 import { INSTRUCAO_COTACAO, RESTO_DE_MARCADOR, catalogoDoTurno, resolverMarcadores, temMarcador } from './cotacao';
@@ -1150,95 +1150,71 @@ ${notaAtendente}` : notaAtendente };
     }
   }
 
-  // ── Trava de unidade (agents/trava-unidade.ts, 17/11/2026) ─────────────
-  // Só com `prompt_config.trava_unidade` (Leandro). Roda ANTES dos guards de lastro, cotação e agendamento:
-  // a reescrita daqui passa por eles como qualquer resposta (achado do Codex, 17/11).
-  //  1) data oferecida numa unidade que a agenda do turno não tem nessa data: refaz UMA vez; se insistir,
-  //     confirma pelo evento que a ferramenta criou no turno ou, sem evento, pede o dia.
-  //  2) serviço restrito (invertida = Ibiporã): afirmou o serviço na unidade proibida → refaz uma vez e, se
-  //     insistir, tira a frase; ofereceu horário lá sem avisar → acrescenta o aviso fixo.
-  // Falha-aberto: erro ou demora aqui deixa a resposta seguir. Log sem await (não segura o turno).
-  if (parsed.mensagens.length && !parsed.redirect_human && !deadline.expired()) {
-    const trava = await Promise.race([
-      getTravaUnidade(req.agent_id),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+  // ── Trava de unidade (agents/trava-unidade.ts, 17/11/2026, v3) ─────────
+  // Só com `prompt_config.trava_unidade` (Leandro). Roda ANTES dos guards de lastro, cotação e agendamento
+  // (a reescrita passa por eles) e de novo no fim do turno, sem LLM, depois de todos eles.
+  //  1) com tempo: refaz UMA vez a resposta com data numa unidade que a agenda do turno não tem, e UMA vez a
+  //     que afirma o serviço restrito na unidade proibida; a reescrita só vale se não trouxer nenhum dos dois.
+  //  2) sempre, mesmo sem tempo (aplicarSemModelo): data errada → confirmação pelo evento criado no turno ou
+  //     pedido do dia; contradição → tira a frase; oferta sem aviso → acrescenta o aviso.
+  // Falha-aberto: erro aqui deixa a resposta seguir. Log sem await e com catch (não segura nem derruba o turno).
+  let travaDoTurno: TravaUnidadeConfig | null = null;
+  let agendaDoTurno: MapaAgenda = new Map();
+  const falasRecentesAgente = history.filter((h) => h.role === 'assistant').slice(-2).map((h) => h.content);
+  if (parsed.mensagens.length && !parsed.redirect_human) {
+    // Sem tempo ainda lê (a trava sem modelo é barata), mas espera no máximo 300 ms; o cache responde na hora.
+    const esperaMs = deadline.expired() ? 300 : Math.max(300, Math.min(1500, deadline.remaining()));
+    travaDoTurno = await Promise.race([
+      getTravaUnidade(req.agent_id).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), esperaMs)),
     ]);
-    if (trava) {
+    if (travaDoTurno) {
+      const trava = travaDoTurno;
       try {
         const enforce = trava.modo === 'enforce' && !ehDemonstracao(req.conversation_id);
         const tools = result.executorTrace.tools_called;
-        const agenda = mapaDaAgenda([...tools.map((t) => t.result), ...result.communications.map((c) => c.result)]);
-        const violacoes = checarDataUnidade(parsed.mensagens, agenda, trava.unidades);
-        if (violacoes.length) {
-          const originais = parsed.mensagens;
-          let desfecho: 'shadow' | 'reescrito' | 'confirmou_evento' | 'pediu_dia' = 'shadow';
-          if (enforce) {
-            const revisto = deadline.expired()
-              ? null
-              : await reescreverComInstrucao(req, history, estilo, providerUsed, result, instrucaoDataUnidade(violacoes), deadline, 'TravaUnidade');
-            if (revisto && revisto.mensagens.length && checarDataUnidade(revisto.mensagens, agenda, trava.unidades).length === 0) {
+        agendaDoTurno = mapaDaAgenda([...tools.map((t) => t.result), ...result.communications.map((c) => c.result)]);
+        const agenda = agendaDoTurno;
+        const original = parsed.mensagens;
+        const semProblema = (msgs: string[]) =>
+          checarDataUnidade(msgs, agenda, trava.unidades).length === 0 &&
+          !checarServico({ mensagens: msgs, clientMessage: req.client_messages, falasRecentesDoAgente: falasRecentesAgente, agenda, servicos: trava.servicos, unidades: trava.unidades }).some((p) => p.tipo === 'contradicao');
+        let reescreveu = '';
+        if (enforce && !deadline.expired()) {
+          const violacoes = checarDataUnidade(parsed.mensagens, agenda, trava.unidades);
+          const contradicoes = checarServico({ mensagens: parsed.mensagens, clientMessage: req.client_messages, falasRecentesDoAgente: falasRecentesAgente, agenda, servicos: trava.servicos, unidades: trava.unidades }).filter((p) => p.tipo === 'contradicao');
+          if (violacoes.length || contradicoes.length) {
+            const instrucao = [violacoes.length ? instrucaoDataUnidade(violacoes) : '', contradicoes.length ? instrucaoServico(contradicoes) : ''].filter(Boolean).join('\n');
+            const revisto = await reescreverComInstrucao(req, history, estilo, providerUsed, result, instrucao, deadline, 'TravaUnidade');
+            if (revisto && revisto.mensagens.length && semProblema(revisto.mensagens)) {
               parsed = revisto;
-              desfecho = 'reescrito';
-            } else {
-              const doEvento = confirmacaoDoEvento(tools);
-              parsed = { ...parsed, mensagens: [doEvento ?? MENSAGEM_DATA_A_CONFIRMAR] };
-              desfecho = doEvento ? 'confirmou_evento' : 'pediu_dia';
-            }
+              reescreveu = 'reescrito';
+            } else reescreveu = 'reescrita_recusada';
           }
-          console.warn(`[TravaUnidade] data_unidade ${desfecho}: ${violacoes.map((v) => v.data + '@' + v.unidade).join(', ')} (lead ${req.lead_id})`);
+        }
+        const r = aplicarSemModelo({
+          mensagens: parsed.mensagens,
+          agenda,
+          trava,
+          clientMessage: req.client_messages,
+          falasRecentesDoAgente: falasRecentesAgente,
+          tools,
+          mensagemPedeDia: MENSAGEM_DATA_A_CONFIRMAR,
+        });
+        if (enforce && r.feito.length) parsed = { ...parsed, mensagens: r.mensagens };
+        const feito = [reescreveu, ...r.feito].filter(Boolean);
+        if (feito.length || r.violacoes.length || r.problemas.length) {
+          console.warn(`[TravaUnidade] turno ${enforce ? feito.join('+') || 'nada' : 'shadow'} (lead ${req.lead_id})`);
           void logGuardShadow({
             agent_id: req.agent_id,
             conversation_id: req.conversation_id,
             lead_id: req.lead_id,
-            verdict: `unidade_data_${desfecho}`,
-            tokens: violacoes.map((v) => `${v.data}@${v.unidade} (agenda: ${v.unidadesDaAgenda.join('/') || 'sem vaga'})`),
-            mensagens: desfecho === 'shadow' ? originais : [...originais, '--- depois da trava ---', ...parsed.mensagens],
+            verdict: `trava_unidade_${enforce ? feito.join('+') || 'ok' : 'shadow'}`,
+            tokens: [...r.violacoes.map((v) => `${v.data}@${v.unidade}`), ...r.problemas.map((p) => p.tipo)],
+            mensagens: enforce ? [...original, '--- depois da trava ---', ...parsed.mensagens] : original,
             tools_called: tools.map((t) => t.tool),
             guard_mode: trava.modo,
           }).catch(() => undefined);
-        }
-        if (trava.servicos.length && !parsed.redirect_human) {
-          const recentes = history.filter((h) => h.role === 'assistant').slice(-2).map((h) => h.content);
-          const checar = (msgs: string[]) =>
-            checarServico({ mensagens: msgs, clientMessage: req.client_messages, falasRecentesDoAgente: recentes, agenda, servicos: trava.servicos, unidades: trava.unidades });
-          let problemas = checar(parsed.mensagens);
-          if (problemas.length) {
-            const originais = parsed.mensagens;
-            const tipos = problemas.map((p) => p.tipo);
-            let desfecho = 'shadow';
-            if (enforce) {
-              const contradicoes = problemas.filter((p) => p.tipo === 'contradicao');
-              if (contradicoes.length) {
-                const revisto = deadline.expired()
-                  ? null
-                  : await reescreverComInstrucao(req, history, estilo, providerUsed, result, instrucaoServico(contradicoes), deadline, 'TravaServico');
-                if (revisto && revisto.mensagens.length && !checar(revisto.mensagens).some((p) => p.tipo === 'contradicao')) {
-                  parsed = revisto;
-                  desfecho = 'reescrito';
-                } else {
-                  const limpas = tirarContradicoes(parsed.mensagens, trava.servicos, trava.unidades);
-                  parsed = { ...parsed, mensagens: limpas };
-                  desfecho = 'tirou_frase';
-                }
-                problemas = checar(parsed.mensagens);
-              }
-              const avisos = problemas.filter((p) => p.tipo === 'aviso');
-              if (avisos.length || !parsed.mensagens.length) {
-                parsed = { ...parsed, mensagens: acrescentarAvisos(parsed.mensagens, avisos.length ? avisos : contradicoes) };
-                desfecho = desfecho === 'shadow' ? 'aviso' : `${desfecho}+aviso`;
-              }
-            }
-            void logGuardShadow({
-              agent_id: req.agent_id,
-              conversation_id: req.conversation_id,
-              lead_id: req.lead_id,
-              verdict: `servico_unidade_${desfecho}`,
-              tokens: tipos,
-              mensagens: desfecho === 'shadow' ? originais : [...originais, '--- depois da trava ---', ...parsed.mensagens],
-              tools_called: tools.map((t) => t.tool),
-              guard_mode: trava.modo,
-            }).catch(() => undefined);
-          }
         }
       } catch (err) {
         console.error('[TravaUnidade] falhou, resposta segue como está:', err instanceof Error ? err.message : String(err));
@@ -1369,7 +1345,6 @@ ${notaAtendente}` : notaAtendente };
   }
 
   // Guard de agendamento: a resposta não pode afirmar que o horário está marcado
-  // sem que o evento exista.
   // sem que o evento exista. Só toca a rede quando o texto casa o padrão de
   // confirmação — nos demais turnos o custo é uma regex.
   if (afirmaAgendamento(parsed.mensagens)) {
@@ -1425,6 +1400,40 @@ ${notaAtendente}` : notaAtendente };
       }
       // 'reparado': o evento passou a existir, a confirmação original vale.
       // 'nada': caminho feliz — o evento já estava criado.
+    }
+  }
+
+  // ── Trava de unidade: passada final, sem LLM (agents/trava-unidade.ts) ──
+  // Lastro, cotação e agendamento podem ter reescrito a resposta depois da trava do turno. Aqui as duas
+  // regras são conferidas de novo no texto que vai sair; o que estiver errado é resolvido sem modelo.
+  if (travaDoTurno && travaDoTurno.modo === 'enforce' && !ehDemonstracao(req.conversation_id) && parsed.mensagens.length && !parsed.redirect_human) {
+    try {
+      const r = aplicarSemModelo({
+        mensagens: parsed.mensagens,
+        agenda: agendaDoTurno,
+        trava: travaDoTurno,
+        clientMessage: req.client_messages,
+        falasRecentesDoAgente: falasRecentesAgente,
+        tools: result.executorTrace.tools_called,
+        mensagemPedeDia: MENSAGEM_DATA_A_CONFIRMAR,
+      });
+      if (r.feito.length) {
+        const antes = parsed.mensagens;
+        parsed = { ...parsed, mensagens: r.mensagens };
+        console.warn(`[TravaUnidade] final ${r.feito.join('+')} (lead ${req.lead_id})`);
+        void logGuardShadow({
+          agent_id: req.agent_id,
+          conversation_id: req.conversation_id,
+          lead_id: req.lead_id,
+          verdict: `trava_unidade_final_${r.feito.join('+')}`,
+          tokens: [...r.violacoes.map((v) => `${v.data}@${v.unidade}`), ...r.problemas.map((p) => p.tipo)],
+          mensagens: [...antes, '--- depois da trava ---', ...parsed.mensagens],
+          tools_called: result.executorTrace.tools_called.map((t) => t.tool),
+          guard_mode: 'enforce',
+        }).catch(() => undefined);
+      }
+    } catch (err) {
+      console.error('[TravaUnidade] passada final falhou, resposta segue:', err instanceof Error ? err.message : String(err));
     }
   }
 

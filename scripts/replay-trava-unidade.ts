@@ -4,6 +4,10 @@
  *
  * Entrada: JSON de linhas { created_at, conversation_id, saida: string[], tools: [{tool,result}], ag_recentes, ult_user }
  * (interaction_logs do agente). Uso: npx tsx scripts/replay-trava-unidade.ts turnos.json config.json
+ *
+ * Limites (revisão do Codex, 17/11): o interaction_logs não guarda `communications`, então a agenda vem só
+ * de `tools[].result`; `ag_recentes` é o que o exportador juntou (produção usa as 2 últimas falas). Conta
+ * disparos, não acerto: cada caso impresso precisa ser conferido à mão.
  */
 import fs from 'node:fs';
 import { checarDataUnidade, checarServico, lerConfig, mapaDaAgenda } from '../src/agents/trava-unidade';
@@ -25,7 +29,7 @@ for (const l of linhas) {
   if (!msgs.length) continue;
   const agenda = mapaDaAgenda((l.tools ?? []).map((t) => t.result));
   if (agenda.size) comAgenda++;
-  const v = checarDataUnidade(msgs, agenda);
+  const v = checarDataUnidade(msgs, agenda, cfg.unidades);
   const s = checarServico({
     mensagens: msgs,
     clientMessage: l.ult_user ?? '',
