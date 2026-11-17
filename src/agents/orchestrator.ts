@@ -35,7 +35,7 @@ import {
 } from '../services/supabase';
 import { cortarSeConversaNova } from '../memory/conversa';
 import { runExecutor } from './executor';
-import { decidirLoopRobo, JANELA_LOOP_MS, type DecisaoLoop } from './loop-robo';
+import { decidirLoopRoboTurno, JANELA_LOOP_LENTO_MS, type DecisaoLoop } from './loop-robo';
 import { midiasAdiadas, intercalarMidias, paraHistorico, fotosDaBuscaEsquecidas } from './midia-no-fluxo';
 import { aplicarEstilo, type MudancasEstilo } from './estilo-deterministico';
 import { afirmaAgendamento, garantirAgendamento } from './agendamento-guard';
@@ -834,12 +834,12 @@ async function runTurno(req: ChatRequest, scopedClientId: string, deadline: Dead
 
   // Robô do outro lado (agents/loop-robo.ts): a mesma resposta automática chegando sem
   // parar. Pausa antes de qualquer LLM e não grava no histórico; volta sozinho quando a
-  // repetição sai da janela de 1 h. Falha de leitura = turno segue normal.
+  // repetição sai da janela (1 h, ou 24 h no loop lento; uma consulta só). Falha de leitura = turno segue normal.
   if (config.loopRoboMode !== 'off' && ehConversaReal(req.conversation_id)) {
     let decisao: DecisaoLoop | null = null;
     try {
-      const recebidas = await getMensagensRecebidasDesde(req.conversation_id, new Date(Date.now() - JANELA_LOOP_MS).toISOString());
-      decisao = decidirLoopRobo(recebidas);
+      const recebidas = await getMensagensRecebidasDesde(req.conversation_id, new Date(Date.now() - JANELA_LOOP_LENTO_MS).toISOString());
+      decisao = decidirLoopRoboTurno(recebidas);
     } catch (err) {
       console.error('[LoopRobo] leitura das mensagens falhou, turno segue:', err instanceof Error ? err.message : String(err));
     }
