@@ -131,9 +131,9 @@ export function decidirLoopRoboTurno(mensagens: MensagemRecebida[], agora = Date
  *    saudação automática do WhatsApp dela). A exceção é a sequência de 10 ou mais, que pausa
  *    mesmo sem saída à vista: sem ela, numa pausa longa a nossa última saída sairia do recorte
  *    de 40 mensagens e a IA responderia de novo a cada 39.
- * 2. A fala do turno (`textoDoTurno`, o que o n8n mandou) bate com a sequência. A leitura do
- *    banco pode estar atrasada: se a pessoa escreveu agora e o recorte ainda mostra só o robô,
- *    o turno segue.
+ * 2. A fala do turno (`textoDoTurno`, o que o n8n mandou) é só a sequência, sem mais nada. A
+ *    leitura do banco pode estar atrasada: se a pessoa escreveu agora (sozinha ou no mesmo lote
+ *    do robô) e o recorte ainda mostra só o robô, o turno segue.
  * 3. Com a IA pausada a sequência cresce sem resposta nova e a pausa continua.
  *
  * Volta sozinho: basta chegar um texto diferente (eco) ou uma fala que não seja automática.
@@ -156,10 +156,19 @@ export function decidirRoboNoRabo(
   const textoDe = (i: number): string => (msgs[i].message_type === 'text' ? normalizarTexto(msgs[i].content ?? '') : '');
   // Pingue-pongue provado (saída nossa depois da mais velha da sequência) ou sequência longa demais para ser gente.
   const comprovada = (tamanho: number): boolean => ultimaSaida > recebidas[tamanho - 1] || tamanho >= SEQUENCIA_SEM_DUVIDA;
+  // A fala do turno tem de ser SÓ a sequência (uma ou mais mensagens dela, que o n8n junta com
+  // quebra de linha). Conter a sequência não basta: num lote "texto do robô + pedido de gente" com
+  // a leitura do banco atrasada, o pedido ficaria sem resposta (2ª revisão do Codex, 17/11/2026).
   const turno = normalizarTexto(textoDoTurno ?? '');
+  const turnoSoRepete = (textos: string[]): boolean => {
+    if (!turno) return false;
+    let resto = turno;
+    for (const t of [...new Set(textos)].sort((a, b) => b.length - a.length)) resto = resto.split(t).join(' ');
+    return resto.trim() === '';
+  };
 
   const alvo = textoDe(recebidas[0]);
-  if (alvo.length >= ECO_MIN_CARACTERES && turno.includes(alvo)) {
+  if (alvo.length >= ECO_MIN_CARACTERES && turnoSoRepete([alvo])) {
     let iguais = 0;
     for (const i of recebidas) {
       if (textoDe(i) !== alvo) break;
@@ -176,7 +185,7 @@ export function decidirRoboNoRabo(
     if (!t || !pareceAutomatica(msgs[i].content ?? '')) break;
     automaticas.push(t);
   }
-  if (automaticas.length >= AUTOMATICAS_SEGUIDAS && comprovada(automaticas.length) && pareceAutomatica(textoDoTurno ?? '')) {
+  if (automaticas.length >= AUTOMATICAS_SEGUIDAS && comprovada(automaticas.length) && turnoSoRepete(automaticas)) {
     return { loop: true, textos: automaticas.length, distintos: new Set(automaticas).size, regra: 'automaticas' };
   }
 

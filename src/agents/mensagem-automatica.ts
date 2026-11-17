@@ -50,7 +50,8 @@ const FRACOS = [
   /\bconvid(e|ar) (seus )?amigos\b/i,
   /\bganhe (recompensas?|pr[eê]mios?|b[oô]nus|dinheiro|moedas)\b/i,
   /\busando (o )?(seu|meu) c[oó]digo\b/i,
-  /https?:\/\/\S*\b(tiktok|kwai|shopee|temu|shein)\.\S+/i,
+  // `\S{0,200}` e não `\S*`: "https://" repetido 8 mil vezes custava 0,4 s (retrocesso quadrático, 2ª revisão do Codex).
+  /https?:\/\/\S{0,200}\b(tiktok|kwai|shopee|temu|shein)\.\S+/i,
   // Saudação de conta comercial: "nós" oferecendo ajuda (14/11/2026: "velas e sabonetes artesanal agradece seu
   // contato. Como podemos ajudar?", resposta ao follow-up da Duda; com 1 sinal só, virou "instabilidade").
   /\bcomo (podemos|poderemos) (te |lhe )?(ajudar|servir)\b/i,
@@ -89,12 +90,32 @@ export function temOpcoesNumeradas(mensagem: string): boolean {
  * inválida, digite somente o número'. O que faço?", "Recebi essa mensagem, é de vocês?". Empresa
  * fala "você" com o cliente; quem fala "vocês", "pra mim" e "tentei" é a pessoa. Ficou de fora
  * "não consegui/não entendi", que robô de menu também diz.
+ *
+ * Só vale para o texto FORA dos itens numerados: menu de empresa escreve opção na primeira pessoa
+ * ("1 - Recebi uma cobrança", "2 - O que faço para cancelar"), e com o veto no texto inteiro esse
+ * robô nunca mais seria reconhecido (2ª revisão do Codex: 300 turnos em 50 h sem pausa).
  */
 const FALA_DE_GENTE = /\b(tentei|apareceu|aparecendo|recebi\s+(ess[ae]|est[ae]|isso|uma?)|mandaram|o\s+que\s+(eu\s+)?(fa[cç]o|devo\s+fazer)|voc[eê]s|pra\s+mim|me\s+ajud[ae]m?)\b/i;
+const INICIO_DE_ITEM = new RegExp(ITEM_DE_MENU.source);
+
+/** O texto fora do menu: em cada linha, corta do primeiro item numerado até o fim. */
+function foraDosItens(mensagem: string): string {
+  return mensagem
+    .split('\n')
+    .map((linha) => {
+      const i = linha.search(INICIO_DE_ITEM);
+      return i < 0 ? linha : linha.slice(0, i);
+    })
+    .join('\n');
+}
+
+/** Mensagem do WhatsApp vai até ~65 mil caracteres; a cara de robô está no começo. Teto para nenhum regex custar caro. */
+const MAX_CARACTERES = 6000;
 
 export function pareceMensagemAutomatica(mensagem: string): boolean {
-  const m = String(mensagem ?? '');
-  if (FALA_DE_GENTE.test(m)) return false;
+  const m = String(mensagem ?? '').slice(0, MAX_CARACTERES);
+  const numeradas = temOpcoesNumeradas(m);
+  if (FALA_DE_GENTE.test(numeradas ? foraDosItens(m) : m)) return false;
   if (FORTES.some((r) => r.test(m))) return true;
-  return FRACOS.filter((r) => r.test(m)).length + (temOpcoesNumeradas(m) ? 1 : 0) >= 2;
+  return FRACOS.filter((r) => r.test(m)).length + (numeradas ? 1 : 0) >= 2;
 }

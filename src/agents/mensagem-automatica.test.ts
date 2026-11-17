@@ -38,6 +38,9 @@ describe('pareceMensagemAutomatica', () => {
     'Eu não estou conseguindo entender sobre o quê você gostaria de conversar 🙁. Para ver todos os serviços oferecidos, digite a palavra *menu*',
     'Atendimento finalizado com sucesso. Segue seu protocolo: 592239624.',
     'Como você avalia o meu atendimento?\n*5* – *_Muito satisfeito_* 🤩\n*4* – *_Satisfeito_* 😍\n*3* – *_Neutro_* 😐\n*2* – *_Insatisfeito_* 🥺\n*1* – *_Muito insatisfeito_* 😔',
+    // 2ª revisão do Codex: menu com opção escrita na primeira pessoa continua sendo robô.
+    'Escolha uma das opções:\n1 - Recebi uma cobrança\n2 - Meu pedido não chegou\nProtocolo: 900000',
+    'Escolha uma das opções: 1 - Recebi uma cobrança 2 - O que faço para cancelar',
   ])('robô: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(true));
 
   it.each([
@@ -71,7 +74,16 @@ describe('pareceMensagemAutomatica', () => {
     "Agora apareceu 'digite menu'. Vocês conseguem marcar pra mim?",
     'Recebi essa mensagem: Digite 1 para falar com o financeiro. É de vocês?',
     'Me mandaram isso: Seja bem-vindo a central de atendimento, escolha uma das opções. Como eu marco?',
+    'Tentei agendar e apareceu: escolha uma das opções 1 - Já sou cliente 2 - Não sou cliente. O que faço?',
   ])('paciente: %s', (m) => expect(pareceMensagemAutomatica(m)).toBe(false));
+
+  it('2ª revisão do Codex: "https://" repetido 8 mil vezes e texto de 60 mil caracteres não travam a CPU', () => {
+    for (const texto of ['https://'.repeat(8000) + 'x', 'digite '.repeat(9000), 'a '.repeat(30_000)]) {
+      const inicio = performance.now();
+      expect(pareceMensagemAutomatica(texto)).toBe(false);
+      expect(performance.now() - inicio).toBeLessThan(300);
+    }
+  });
 
   it('revisão do Codex: "1" seguido de 50 mil espaços não trava a CPU', () => {
     const texto = '1' + ' '.repeat(50_000) + 'x';

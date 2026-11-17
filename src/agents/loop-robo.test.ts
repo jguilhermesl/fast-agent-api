@@ -220,6 +220,18 @@ describe('robô reconhecido pelo rabo da conversa (card #1223)', () => {
       expect(decidir(linha, 'Oi, sou a Maria, pode agendar amanhã?').loop).toBe(false);
     });
 
+    it('2ª revisão do Codex: lote "menu + pedido de gente" com leitura atrasada: o turno segue', () => {
+      const linha = [cliente(FINALIZADO), ia(), cliente('Digite menu para continuar')];
+      expect(decidir(linha, 'Digite menu para continuar\nPreciso cancelar minha consulta de amanhã').loop).toBe(false);
+      expect(decidir(linha, 'Digite menu para continuar\nVocês conseguem cancelar pra mim?').loop).toBe(false);
+    });
+
+    it('lote só com mensagens automáticas da sequência (o n8n juntou duas) continua pausando', () => {
+      const linha = [...SABRINA, cliente(FINALIZADO), ia(), cliente(BOAS_VINDAS), cliente(MENU)];
+      expect(decidir(linha, `${BOAS_VINDAS}\n${MENU}`)).toMatchObject({ loop: true, regra: 'automaticas', textos: 3 });
+      expect(decidir(linha, '').loop).toBe(false);
+    });
+
     it('mensagem de sistema no meio não muda a decisão', () => {
       expect(decidir([...SABRINA, cliente(FINALIZADO), ia(), sistema(), cliente(BOAS_VINDAS)])).toMatchObject({ loop: true, regra: 'automaticas' });
     });
@@ -275,6 +287,9 @@ describe('robô reconhecido pelo rabo da conversa (card #1223)', () => {
       const linha = [...vezes(4, () => [cliente(CLARO), ia()]), cliente(CLARO)];
       expect(decidir(linha, 'Bom dia, quero remarcar minha consulta').loop).toBe(false);
       expect(decidir(linha, `${CLARO}\n${CLARO}`).loop).toBe(true);
+      // 2ª revisão do Codex: lote "texto do robô + pedido de gente" não pode ser calado.
+      expect(decidir(linha, `${CLARO}\nVocês conseguem cancelar pra mim?`).loop).toBe(false);
+      expect(decidir(linha, `${CLARO}\nPreciso cancelar minha consulta de amanhã`).loop).toBe(false);
     });
   });
 
