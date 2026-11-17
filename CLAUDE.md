@@ -91,6 +91,9 @@ Estado das chaves no Railway (nomes conferidos em 31/10/2026 pela API do Railway
   `[LoopRobo]` e `guard_shadow_logs.verdict = loop_robo_pausado`. Volta sozinho quando a repetição sai da janela.
   Áudio/foto/figurinha (texto vazio) e texto de 1 caractere não contam. Simulado em 30 dias: só os 2 loops da Carol.
   `LOOP_ROBO_MODE=log|off` no Railway desliga sem deploy.
+  **Loop lento** (17/11/2026, Diana x robô da Claro: ~5 msgs/h por 5 dias, US$ 4,60): mesma consulta, agora de 24 h
+  (limite 200); a regra da hora olha só a última hora, e se não pegar vale: 24+ textos em 24 h com até 2 diferentes
+  (`regra=lento`). Simulado em 30 dias: só a Diana/Claro; nenhum humano teve 6 textos com até 3 diferentes num dia.
 - **Pergunta repetida** (`src/agents/pergunta-repetida.ts`, 29/10/2026): com `prompt_config.nao_repetir_pergunta: true`
   (só a Canda), se a resposta traz pergunta ("…?") igual ou quase igual (Jaccard ≥ 0,7 das palavras, ou a curta
   contida na longa) a uma das últimas 4 falas da agente no histórico, o orquestrador refaz a resposta UMA vez, sem

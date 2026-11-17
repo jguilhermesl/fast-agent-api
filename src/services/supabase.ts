@@ -147,15 +147,15 @@ export async function getMensagensDoCliente(
 
 // ── Robô do outro lado (agents/loop-robo.ts) ──────────────────
 
-/** Mensagens recebidas do cliente desde `desdeIso` (só tipo e texto), as mais novas primeiro. */
+/** Mensagens recebidas do cliente desde `desdeIso` (tipo, texto e hora), as mais novas primeiro. */
 export async function getMensagensRecebidasDesde(
   conversationId: string,
   desdeIso: string,
   limite = 200
-): Promise<{ message_type: string | null; content: string | null }[]> {
+): Promise<{ message_type: string | null; content: string | null; created_at: string | null }[]> {
   const { data, error } = await supabase
     .from('messages')
-    .select('message_type, content')
+    .select('message_type, content, created_at')
     .eq('conversation_id', conversationId)
     .eq('direction', 'inbound')
     .gte('created_at', desdeIso)
@@ -163,7 +163,7 @@ export async function getMensagensRecebidasDesde(
     .limit(limite);
 
   if (error) throw new Error(`getMensagensRecebidasDesde: ${error.message}`);
-  return (data ?? []) as { message_type: string | null; content: string | null }[];
+  return (data ?? []) as { message_type: string | null; content: string | null; created_at: string | null }[];
 }
 
 // ── Rajada (agents/rajada.ts) ─────────────────────────────────
